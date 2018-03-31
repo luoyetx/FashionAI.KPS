@@ -32,35 +32,47 @@ if __name__ == '__main__':
     parser.add_argument('--data-dir', type=str, default='./data')
     parser.add_argument('--category', type=str, default='skirt', choices=['blouse', 'skirt', 'outwear', 'dress', 'trousers'])
     parser.add_argument('--cpm-stages', type=int, default=5)
+    parser.add_argument('--cpm-channels', type=int, default=128)
+    parser.add_argument('--optim', type=str, default='sgd', choices=['sgd', 'adam'])
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg19'])
+    parser.add_argument('--test-idx', type=int, default=0)
     args = parser.parse_args()
     print(args)
     # seed
     mx.random.seed(args.seed)
     np.random.seed(args.seed)
-    # parameters
+    # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
+    cpm_stages = args.cpm_stages
+    cpm_channels = args.cpm_channels
+    epoch = args.epoch
+    optim = args.optim
+    category = args.category
+    data_dir = args.data_dir
+    backbone = args.backbone
+    test_idx = args.test_idx
+    base_name = '%s-%s-S%d-C%d-%s' % (category, backbone, cpm_stages, cpm_channels, optim)
     # model
-    num_kps = len(cfg.LANDMARK_IDX[args.category])
-    num_limb = len(cfg.PAF_LANDMARK_PAIR[args.category])
-    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=args.cpm_stages)
-    creator, featname, fixed = cfg.BACKBONE[args.backbone]
+    num_kps = len(cfg.LANDMARK_IDX[category])
+    num_limb = len(cfg.PAF_LANDMARK_PAIR[category])
+    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
+    creator, featname, fixed = cfg.BACKBONE[backbone]
     net.init_backbone(creator, featname, fixed)
-    net.load_params('./output/%s-%s-%04d.params' % (args.category, args.backbone, args.epoch), mx.cpu(0))
+    net.load_params('./output/%s-%04d.params' % (base_name, epoch), mx.cpu(0))
     net.collect_params().reset_ctx(ctx)
     # data
-    df = pd.read_csv(os.path.join(args.data_dir, 'train/Annotations/train.csv'))
+    df = pd.read_csv(os.path.join(data_dir, 'train/Annotations/train.csv'))
     df = df.sample(frac=1)
     train_num = int(len(df) * 0.9)
     df_train = df[:train_num]
     df_test = df[train_num:]
-    traindata = FashionAIKPSDataSet(df_train, args.category, True)
-    testdata = FashionAIKPSDataSet(df_test, args.category, False)
+    traindata = FashionAIKPSDataSet(df_train, category, True)
+    testdata = FashionAIKPSDataSet(df_test, category, False)
     # render
     mean = np.array(cfg.PIXEL_MEAN, dtype='float32').reshape((3, 1, 1))
     std = np.array(cfg.PIXEL_STD, dtype='float32').reshape((3, 1, 1))
-    data, heatmap, paf = traindata[10]
+    data, heatmap, paf = testdata[test_idx]
     heatmap = heatmap.max(axis=0)
     paf = paf.max(axis=0)
     im = (data * std + mean).astype('uint8').transpose((1, 2, 0))[:, :, ::-1]
@@ -76,10 +88,10 @@ if __name__ == '__main__':
     dr3 = draw(im, out_heatmap)
     dr4 = draw(im, out_paf)
 
-    cv2.imwrite('./tmp/ori_heatmap.jpg', dr1)
-    cv2.imwrite('./tmp/ori_paf.jpg', dr2)
-    cv2.imwrite('./tmp/pred_heatmap.jpg', dr3)
-    cv2.imwrite('./tmp/pred_paf.jpg', dr4)
+    cv2.imwrite('./tmp/%s_%d_ori_heatmap.jpg' % (category, test_idx), dr1)
+    cv2.imwrite('./tmp/%s_%d_ori_paf.jpg' % (category, test_idx), dr2)
+    cv2.imwrite('./tmp/%s_%d_pred_heatmap.jpg' % (category, test_idx), dr3)
+    cv2.imwrite('./tmp/%s_%d_pred_paf.jpg' % (category, test_idx), dr4)
     cv2.imshow('ori_heatmap', dr1)
     cv2.imshow('ori_paf', dr2)
     cv2.imshow('pred_heatmap', dr3)

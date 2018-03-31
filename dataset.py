@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import os
+import argparse
 import cv2
 import mxnet as mx
 from mxnet import gluon as gl
@@ -169,17 +170,23 @@ def draw_kps(im, kps):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--category', type=str, default='skirt', choices=['blouse', 'skirt', 'outwear', 'dress', 'trousers'])
+    args = parser.parse_args()
     np.random.seed(0)
     df = pd.read_csv('./data/train/Annotations/train.csv')
-    dataset = FashionAIKPSDataSet(df, 'skirt')
+    dataset = FashionAIKPSDataSet(df, args.category)
     mean = np.array(cfg.PIXEL_MEAN, dtype='float32').reshape((3, 1, 1))
     std = np.array(cfg.PIXEL_STD, dtype='float32').reshape((3, 1, 1))
     np.random.seed(0)
     print(len(dataset))
     for (data, heatmap, paf) in dataset:
-        data, heatmap, paf = dataset[10]
+        #data, heatmap, paf = dataset[10]
         img = (data * std + mean).astype('uint8').transpose((1, 2, 0))[:, :, ::-1]
         heatmap = heatmap.max(axis=0)
+        n, h, w = paf.shape
+        paf = paf.reshape((n // 2, 2, h, w))
+        paf = np.sqrt(np.square(paf[:, 0]) + np.square(paf[:, 1]))
         paf = paf.max(axis=0)
 
         def draw(img, ht):

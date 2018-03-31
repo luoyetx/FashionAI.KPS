@@ -7,12 +7,12 @@ from mxnet.gluon import nn
 
 class CPMBlock(gl.HybridBlock):
 
-    def __init__(self, num_output, ks=[3, 3, 3, 1, 1], **kwargs):
+    def __init__(self, num_output, channels, ks=[3, 3, 3, 1, 1], **kwargs):
         super(CPMBlock, self).__init__(**kwargs)
         with self.name_scope():
             self.net = nn.HybridSequential()
             for k in ks[:-1]:
-                self.net.add(nn.Conv2D(128, k, 1, k // 2, activation='relu'))
+                self.net.add(nn.Conv2D(channels, k, 1, k // 2, activation='relu'))
             self.net.add(nn.Conv2D(num_output, ks[-1], 1, ks[-1] // 2))
             for conv in self.net:
                 conv.weight.lr_mult = 4
@@ -24,25 +24,26 @@ class CPMBlock(gl.HybridBlock):
 
 class PoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, stages, **kwargs):
+    def __init__(self, num_kps, num_limb, stages, channels, **kwargs):
         super(PoseNet, self).__init__(**kwargs)
         with self.name_scope():
             # backbone
             self.backbone = None
             # feature transfer
             self.feature_trans = nn.HybridSequential()
-            self.feature_trans.add(nn.Conv2D(256, 3, 1, 1, activation='relu'), nn.Conv2D(128, 3, 1, 1, activation='relu'))
+            self.feature_trans.add(nn.Conv2D(2 * channels, 3, 1, 1, activation='relu'),
+                                   nn.Conv2D(channels, 3, 1, 1, activation='relu'))
             # cpm
             self.stages = stages
             self.kps_cpm = nn.HybridSequential()
             self.limb_cpm = nn.HybridSequential()
             ks1 = [3, 3, 3, 1, 1]
             ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps, ks1))
-            self.limb_cpm.add(CPMBlock(2*num_limb, ks1))
+            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
+            self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks1))
             for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps, ks2))
-                self.limb_cpm.add(CPMBlock(2*num_limb, ks2))
+                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
+                self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks2))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)
