@@ -1,4 +1,5 @@
 from easydict import EasyDict
+import numpy as np
 from mxnet import gluon as gl
 
 cfg = EasyDict()
@@ -51,7 +52,7 @@ cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 cfg.BACKBONE = {
     'vgg16': (gl.model_zoo.vision.vgg16, 'relu8', ['conv0', 'conv1', 'conv2', 'conv3']),
     'vgg19': (gl.model_zoo.vision.vgg19, 'relu9', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'reset50': (gl.model_zoo.vision.resnet50_v2, ''),
+    'reset50': (gl.model_zoo.vision.resnet50_v2, '', []),
 }
 
 cfg.TEST_IMAGE = {

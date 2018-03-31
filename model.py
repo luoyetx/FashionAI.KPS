@@ -39,11 +39,11 @@ class PoseNet(gl.HybridBlock):
             self.limb_cpm = nn.HybridSequential()
             ks1 = [3, 3, 3, 1, 1]
             ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
-            self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks1))
+            self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks1))
+            self.limb_cpm.add(CPMBlock(2 * num_limb, channels, ks1))
             for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
-                self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks2))
+                self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks2))
+                self.limb_cpm.add(CPMBlock(2 * num_limb, channels, ks2))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)

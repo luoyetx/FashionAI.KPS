@@ -53,7 +53,7 @@ def transform(img, category, kps, is_train=True):
             kps[i] = kps[j]
             kps[j] = tmp
     # rotate
-    if np.random.rand() > 0.5 and is_train:
+    if is_train:
         angle = (np.random.random() - 0.5) * 2 * cfg.ROT_MAX
         center = (width // 2, height // 2)
         rot = cv2.getRotationMatrix2D(center, angle, 1)
@@ -99,13 +99,14 @@ def get_label(img, category, kps):
     num_kps = len(kps)
     limb = cfg.PAF_LANDMARK_PAIR[category]
     num_limb = len(limb)
-    heatmap = np.zeros((num_kps, grid_y, grid_x))
+    heatmap = np.zeros((num_kps + 1, grid_y, grid_x))
     paf = np.zeros((2 * num_limb, grid_y, grid_x))
     count = np.zeros((grid_y, grid_x))
     miss = np.logical_or(kps[:, 0] == -1, kps[:, 1] == -1)
     for i, (x, y) in enumerate(kps):
         if not miss[i]:
             putGaussianMaps(heatmap[i], height, width, x, y, stride, grid_x, grid_y, cfg.SIGMA)
+    heatmap[-1] = heatmap[::-1].max(axis=0)
     for i, (idx1, idx2) in enumerate(limb):
         if not miss[idx1] and not miss[idx2]:
             ldm1 = kps[idx1]
@@ -183,14 +184,15 @@ if __name__ == '__main__':
     for (data, heatmap, paf) in dataset:
         #data, heatmap, paf = dataset[10]
         img = (data * std + mean).astype('uint8').transpose((1, 2, 0))[:, :, ::-1]
-        heatmap = heatmap.max(axis=0)
+        heatmap = heatmap[-1]
         n, h, w = paf.shape
         paf = paf.reshape((n // 2, 2, h, w))
         paf = np.sqrt(np.square(paf[:, 0]) + np.square(paf[:, 1]))
         paf = paf.max(axis=0)
 
         def draw(img, ht):
-            ht = cv2.resize(ht, (0, 0), ht, 8, 8)
+            h, w = img.shape[:2]
+            ht = cv2.resize(ht, (w, h))
             ht = (ht * 255).astype(np.uint8)
             ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
             drawed = cv2.addWeighted(img, 0.5, ht, 0.5, 0)

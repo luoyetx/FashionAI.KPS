@@ -92,8 +92,9 @@ if __name__ == '__main__':
     parser.add_argument('--wd', type=float, default=1e-5)
     parser.add_argument('--optim', type=str, default='sgd', choices=['sgd', 'adam'])
     parser.add_argument('--cpm-stages', type=int, default=5)
-    parser.add_argument('--cpm-channels', type=int, default=128)
+    parser.add_argument('--cpm-channels', type=int, default=64)
     parser.add_argument('--seed', type=int, default=666)
+    parser.add_argument('--steps', type=str, default='30,60')
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg19'])
     args = parser.parse_args()
     print(args)
@@ -110,6 +111,7 @@ if __name__ == '__main__':
     batch_size = args.batch_size
     epoches = args.epoches
     freq = args.freq
+    steps = [int(x) for x in args.steps.split(',')]
     category = args.category
     data_dir = args.data_dir
     backbone = args.backbone
@@ -124,6 +126,7 @@ if __name__ == '__main__':
     testdata = FashionAIKPSDataSet(df_test, category, False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
+    epoch_size = len(trainloader)
     # model
     num_kps = len(cfg.LANDMARK_IDX[category])
     num_limb = len(cfg.PAF_LANDMARK_PAIR[category])
@@ -135,10 +138,12 @@ if __name__ == '__main__':
     net.hybridize()
     criterion = SumL2Loss()
     # trainer
+    steps = [epoch_size * x for x in steps]
+    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
     if optim == 'sgd':
-        trainer = gl.trainer.Trainer(net.collect_params(), 'sgd', {'learning_rate': lr, 'wd': wd, 'momentum': 0.9})
+        trainer = gl.trainer.Trainer(net.collect_params(), 'sgd', {'learning_rate': lr, 'wd': wd, 'momentum': 0.9, 'lr_scheduler': lr_scheduler})
     else:
-        trainer = gl.trainer.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'wd': wd})
+        trainer = gl.trainer.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'wd': wd, 'lr_scheduler': lr_scheduler})
     # logger
     log_dir = './log/%s' % base_name
     if os.path.exists(log_dir):
@@ -146,8 +151,8 @@ if __name__ == '__main__':
     writer = SummaryWriter(log_dir)
     rds = []
     for i in range(cpm_stages):
-        rd1 = Recorder('%s-h-%d' % (base_name, i), freq)
-        rd2 = Recorder('%s-p-%d' % (base_name, i), freq)
+        rd1 = Recorder('h-%d' % i, freq)
+        rd2 = Recorder('p-%d' % i, freq)
         rds.append(rd1)
         rds.append(rd2)
     logger = get_logger()
@@ -173,6 +178,7 @@ if __name__ == '__main__':
             for rd, loss in zip(rds, losses):
                 rd.update(loss.mean().asscalar())
             if batch_idx % freq == freq - 1:
+                writer.add_scalar('lr', trainer.learning_rate, global_step)
                 for rd in rds:
                     name, value = rd.get()
                     writer.add_scalar('train/' + name, value, global_step)
