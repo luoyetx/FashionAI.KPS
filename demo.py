@@ -20,6 +20,8 @@ from config import cfg
 def draw(img, ht):
     h, w = img.shape[:2]
     ht = cv2.resize(ht, (w, h))
+    ht[ht < 0] = 0
+    ht[ht > 1] = 1
     ht = (ht * 255).astype(np.uint8)
     ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
     drawed = cv2.addWeighted(img, 0.5, ht, 0.5, 0)

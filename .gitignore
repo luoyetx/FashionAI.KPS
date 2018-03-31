@@ -2,6 +2,7 @@ data
 log
 output
 tmp
+result
 .ipynb_checkpoints
 
 *.pyc
