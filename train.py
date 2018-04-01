@@ -204,6 +204,7 @@ if __name__ == '__main__':
         tic = time.time()
         for rd in rds:
             rd.reset()
+        writer.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
             losses = forward_net(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
@@ -215,7 +216,6 @@ if __name__ == '__main__':
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
             if batch_idx % freq == freq - 1:
-                writer.add_scalar('lr', trainer.learning_rate, global_step)
                 for rd in rds:
                     name, value = rd.get()
                     writer.add_scalar('train/' + name, value, global_step)
