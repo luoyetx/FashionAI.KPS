@@ -70,7 +70,7 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_net(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
+def forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
     data = gl.utils.split_and_load(data, ctx)
     heatmap = gl.utils.split_and_load(heatmap, ctx)
     heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
@@ -78,18 +78,22 @@ def forward_net(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=T
     paf_mask = gl.utils.split_and_load(paf_mask ,ctx)
     ag.set_recording(is_train)
     ag.set_training(is_train)
-    out = [net(rv) for rv in data]
     losses = []
-    for out_, heatmap_, paf_, heatmap_mask_, paf_mask_ in zip(out, heatmap, paf, heatmap_mask, paf_mask):
+    for data_, heatmap_, paf_, heatmap_mask_, paf_mask_ in zip(data, heatmap, paf, heatmap_mask, paf_mask):
+        # forward
+        out_ = net(data_)
         losses_ = []
-        for stage_j in range(cpm_stages):
-            out_[stage_j][0] = nd.elemwise_mul(out_[stage_j][0], heatmap_mask_)
-            out_[stage_j][1] = nd.elemwise_mul(out_[stage_j][1], paf_mask_)
+        for i in range(cpm_stages):
+            out_[i][0] = nd.elemwise_mul(out_[i][0], heatmap_mask_)
+            out_[i][1] = nd.elemwise_mul(out_[i][1], paf_mask_)
             heatmap_ = nd.elemwise_mul(heatmap_, heatmap_mask_)
             paf_ = nd.elemwise_mul(paf_, paf_mask_)
-            losses_.append(criterion(out_[stage_j][0], heatmap_))
-            losses_.append(criterion(out_[stage_j][1], paf_))
+            losses_.append(criterion(out_[i][0], heatmap_))
+            losses_.append(criterion(out_[i][1], paf_))
         losses.append(losses_)
+        # backward
+        if is_train:
+            ag.backward(losses_)
     ag.set_recording(False)
     ag.set_training(False)
     return losses
@@ -111,6 +115,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--epoches', type=int, default=100)
     parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--iter-size', type=int, default=1)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--wd', type=float, default=1e-5)
@@ -129,7 +134,6 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
     # hyper parameters
     ctx = [mx.gpu(int(x)) for x in args.gpu.split(',')]
-    num_ctx = len(ctx)
     data_dir = cfg.DATA_DIR
     cpm_stages = args.cpm_stages
     cpm_channels = args.cpm_channels
@@ -137,6 +141,7 @@ if __name__ == '__main__':
     wd = args.wd
     optim = args.optim
     batch_size = args.batch_size
+    iter_size = args.iter_size
     epoches = args.epoches
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
@@ -199,6 +204,8 @@ if __name__ == '__main__':
         meta_path = './output/%s-%04d.meta' % (base_name, start_epoch - 1)
         logger.info('Load meta from %s'%meta_path)
         global_step = pickle.load(open(meta_path, 'rb'))
+    # update ctx
+    ctx = ctx * iter_size
     for epoch_idx in range(start_epoch - 1, epoches):
         # train part
         tic = time.time()
@@ -207,9 +214,7 @@ if __name__ == '__main__':
         writer.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
-            losses = forward_net(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
-            for i in range(num_ctx):
-                ag.backward(losses[i])
+            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -232,7 +237,7 @@ if __name__ == '__main__':
         for rd in rds:
             rd.reset()
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(testloader):
-            losses = forward_net(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
+            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
