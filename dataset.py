@@ -7,6 +7,7 @@ import mxnet as mx
 from mxnet import gluon as gl
 import pandas as pd
 import numpy as np
+
 from config import cfg
 from utils import process_cv_img, reverse_to_cv_img, crop_patch, draw_heatmap, draw_kps, draw_paf
 

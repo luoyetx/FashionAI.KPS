@@ -3,11 +3,14 @@ from __future__ import print_function, division
 import os
 import logging
 import cv2
+import mxnet as mx
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 import matplotlib
 matplotlib.use('Agg')
 import seaborn as sns
+
+from model import PoseNet
 from config import cfg
 
 
@@ -106,6 +109,17 @@ def get_logger(name=None):
     sh.setFormatter(formatter)
     logger.addHandler(sh)
     return logger
+
+
+def load_model(model):
+    num_kps = cfg.NUM_LANDMARK
+    num_limb = len(cfg.PAF_LANDMARK_PAIR)
+    backbone, cpm_stages, cpm_channels = parse_from_name(model)
+    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
+    creator, featname, fixed = cfg.BACKBONE[backbone]
+    net.init_backbone(creator, featname, fixed)
+    net.load_params(model, mx.cpu(0))
+    return net
 
 
 def detect_kps(img, heatmap, paf, category):

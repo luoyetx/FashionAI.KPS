@@ -76,4 +76,3 @@ class PoseNet(gl.HybridBlock):
                     print('fix', key)
                     item.grad_req = 'null'
             # special for batchnorm
-

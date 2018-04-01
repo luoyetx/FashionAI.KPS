@@ -9,9 +9,11 @@ import mxnet as mx
 import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
+
 from model import PoseNet
 from config import cfg
-from utils import draw_heatmap, draw_paf, draw_kps, parse_from_name, detect_kps, process_cv_img, get_logger
+from utils import draw_heatmap, draw_paf, draw_kps
+from utils import detect_kps, process_cv_img, get_logger, load_model
 
 
 if __name__ == '__main__':
@@ -24,17 +26,12 @@ if __name__ == '__main__':
     # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
     data_dir = cfg.DATA_DIR
-    backbone, cpm_stages, cpm_channels = parse_from_name(args.model)
     show = args.show
     logger = get_logger()
     # model
-    num_kps = cfg.NUM_LANDMARK
-    num_limb = len(cfg.PAF_LANDMARK_PAIR)
-    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
-    creator, featname, fixed = cfg.BACKBONE[backbone]
-    net.init_backbone(creator, featname, fixed)
-    net.load_params(args.model, mx.cpu(0))
+    net = load_model(args.model)
     net.collect_params().reset_ctx(ctx)
+    net.hybridize()
     # data
     df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
     result = []
