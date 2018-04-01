@@ -31,7 +31,7 @@ class PoseNet(gl.HybridBlock):
             self.backbone = None
             # feature transfer
             self.feature_trans = nn.HybridSequential()
-            self.feature_trans.add(nn.Conv2D(2 * channels, 3, 1, 1, activation='relu'),
+            self.feature_trans.add(nn.Conv2D(2*channels, 3, 1, 1, activation='relu'),
                                    nn.Conv2D(channels, 3, 1, 1, activation='relu'))
             # cpm
             self.stages = stages
@@ -40,10 +40,10 @@ class PoseNet(gl.HybridBlock):
             ks1 = [3, 3, 3, 1, 1]
             ks2 = [7, 7, 7, 7, 7, 1, 1]
             self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks1))
-            self.limb_cpm.add(CPMBlock(2 * num_limb, channels, ks1))
+            self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks1))
             for _ in range(1, stages):
                 self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks2))
-                self.limb_cpm.add(CPMBlock(2 * num_limb, channels, ks2))
+                self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks2))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)
@@ -65,6 +65,7 @@ class PoseNet(gl.HybridBlock):
             out = backbone(data).get_internals()[out_name]
             name = backbone.name
             self.backbone = gl.SymbolBlock(out, data, params=backbone.collect_params())
+            # hacking parameters
             params = self.backbone.collect_params()
             for key, item in params.items():
                 should_fix = False
@@ -74,3 +75,5 @@ class PoseNet(gl.HybridBlock):
                 if should_fix:
                     print('fix', key)
                     item.grad_req = 'null'
+            # special for batchnorm
+

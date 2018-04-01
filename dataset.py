@@ -8,47 +8,22 @@ from mxnet import gluon as gl
 import pandas as pd
 import numpy as np
 from config import cfg
+from utils import process_cv_img, reverse_to_cv_img, crop_patch, draw_heatmap, draw_kps, draw_paf
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
 from heatmap import putGaussianMaps, putVecMaps
 
 
-def crop_patch(img, bbox, wrap=True):
-    height, width = img.shape[:-1]
-    x1, y1, x2, y2 = bbox
-    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-    if x1 >= width or y1 >= height or x2 <= 0 or y2 <= 0:
-        print('[WARN] ridiculous x1, y1, x2, y2')
-        return None
-    if x1 < 0 or y1 < 0 or x2 > width or y2 > height:
-        # out of boundary, still crop the face
-        if not wrap:
-            return None
-        h, w = y2 - y1, x2 - x1
-        patch = np.zeros((h, w, 3), dtype=np.uint8)
-        vx1 = 0 if x1 < 0 else x1
-        vy1 = 0 if y1 < 0 else y1
-        vx2 = width if x2 > width else x2
-        vy2 = height if y2 > height else y2
-        sx = -x1 if x1 < 0 else 0
-        sy = -y1 if y1 < 0 else 0
-        vw = vx2 - vx1
-        vh = vy2 - vy1
-        patch[sy:sy+vh, sx:sx+vw] = img[vy1:vy2, vx1:vx2]
-        return patch
-    return img[y1:y2, x1:x2]
-
-
-def transform(img, category, kps, is_train=True):
+def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
-    miss = np.logical_or(kps[:, 0] == -1, kps[:, 1] == -1)
+    miss = kps[:, 2] == -1
     update_miss = lambda kps: np.logical_or.reduce([kps[:, 0] < 0, kps[:, 1] < 0, kps[:, 0] > width, kps[:, 1] > height, miss])
     # flip
     if np.random.rand() > 0.5 and is_train:
         img = cv2.flip(img, 1)
         kps[:, 0] = width - kps[:, 0]
-        for i, j in cfg.LANDMARK_SWAP[category]:
+        for i, j in cfg.LANDMARK_SWAP:
             tmp = kps[i].copy()
             kps[i] = kps[j]
             kps[j] = tmp
@@ -61,9 +36,11 @@ def transform(img, category, kps, is_train=True):
         dsize = (int(height * sin + width * cos), int(height * cos + width * sin))
         rot[0, 2] += dsize[0] // 2 - center[0]
         rot[1, 2] += dsize[1] // 2 - center[1]
-        img = cv2.warpAffine(img, rot, dsize)
+        img = cv2.warpAffine(img, rot, dsize, img, borderMode=cv2.BORDER_CONSTANT, borderValue=cfg.FILL_VALUE)
         height, width = img.shape[:2]
-        kps = rot.dot(np.hstack([kps, np.ones((len(kps), 1))]).T).T
+        xy = kps[:, :2]
+        xy = rot.dot(np.hstack([xy, np.ones((len(xy), 1))]).T).T
+        kps[:, :2] = xy
         miss = update_miss(kps)
     # scale
     scale = np.random.rand() * (cfg.SCALE_MAX - cfg.SCALE_MIN) + cfg.SCALE_MIN if is_train else cfg.CROP_SIZE
@@ -71,7 +48,7 @@ def transform(img, category, kps, is_train=True):
     scale_factor = scale / max_edge
     img = cv2.resize(img, (0, 0), img, scale_factor, scale_factor)
     height, width = img.shape[:2]
-    kps *= scale_factor
+    kps[:, :2] *= scale_factor
     # crop
     rand_x = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
     rand_y = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
@@ -86,7 +63,7 @@ def transform(img, category, kps, is_train=True):
     kps[:, 0] -= x1
     kps[:, 1] -= y1
     miss = update_miss(kps)
-    # fill kissing
+    # fill missing
     kps[miss] = -1
     return img, kps
 
@@ -96,112 +73,92 @@ def get_label(img, category, kps):
     height, width = img.shape[:2]
     grid_x = width // stride
     grid_y = height // stride
+    # heatmap and mask
+    landmark_idx = cfg.LANDMARK_IDX[category]
     num_kps = len(kps)
-    limb = cfg.PAF_LANDMARK_PAIR[category]
-    num_limb = len(limb)
     heatmap = np.zeros((num_kps + 1, grid_y, grid_x))
-    paf = np.zeros((2 * num_limb, grid_y, grid_x))
-    count = np.zeros((grid_y, grid_x))
-    miss = np.logical_or(kps[:, 0] == -1, kps[:, 1] == -1)
-    for i, (x, y) in enumerate(kps):
-        if not miss[i]:
-            putGaussianMaps(heatmap[i], height, width, x, y, stride, grid_x, grid_y, cfg.SIGMA)
+    heatmap_mask = np.zeros_like(heatmap)
+    for i, (x, y, v) in enumerate(kps):
+        if i in landmark_idx:
+            heatmap_mask[i] = 1
+        if v != -1:
+            putGaussianMaps(heatmap[i], height, width, x, y, stride, grid_x, grid_y, cfg.HEATMAP_SIGMA)
     heatmap[-1] = heatmap[::-1].max(axis=0)
-    for i, (idx1, idx2) in enumerate(limb):
-        if not miss[idx1] and not miss[idx2]:
-            ldm1 = kps[idx1]
-            ldm2 = kps[idx2]
-            putVecMaps(paf[2 * i], paf[2 * i + 1], count, ldm1[0], ldm1[1], ldm2[0], ldm2[1], stride, grid_x, grid_y, cfg.SIGMA, cfg.THRE)
-    return heatmap, paf
-
-
-def process_cv_img(img):
-    # HWC -> CHW, BGR -> RGB
-    img = img.astype('float32').transpose((2, 0, 1))
-    img = img[::-1, :, :]
-    mean = np.array(cfg.PIXEL_MEAN, dtype='float32').reshape((3, 1, 1))
-    std = np.array(cfg.PIXEL_STD, dtype='float32').reshape((3, 1, 1))
-    img = (img - mean) / std
-    return img
+    heatmap_mask[-1] = heatmap_mask[::-1].max(axis=0)
+    # paf
+    limb = cfg.PAF_LANDMARK_PAIR
+    num_limb = len(limb)
+    paf = np.zeros((2 * num_limb, grid_y, grid_x))
+    paf_mask = np.zeros_like(paf)
+    for idx, (idx1, idx2) in enumerate(limb):
+        x1, y1, v1 = kps[idx1]
+        x2, y2, v2 = kps[idx2]
+        if v1 != -1 and v2 != -1:
+            putVecMaps(paf[2*idx], paf[2*idx + 1], x1, y1, x2, y2, stride, grid_x, grid_y, cfg.HEATMAP_THRES)
+            paf_mask[2*idx] = 1
+            paf_mask[2*idx + 1] = 1
+    # result
+    return heatmap, paf, heatmap_mask, paf_mask
 
 
 class FashionAIKPSDataSet(gl.data.Dataset):
 
-    def __init__(self, df, category='blouse', is_train=True):
-        df = df[df['image_category'] == category]
-        df = df.sample(frac=1).reset_index(drop=True)
-        self.img_dir = os.path.join(cfg.IMG_DIR, 'train')
-        self.category = category
-        self.category_idx = cfg.CATEGORY_2_IDX[category]
+    def __init__(self, df, is_train=True):
+        self.img_dir = os.path.join(cfg.DATA_DIR, 'train')
         self.is_train = is_train
         # img path
         self.img_lst = df['image_id'].tolist()
-        # kps
+        self.category = df['image_category'].tolist()
+        # kps, (x, y, v) v -> (not exists -1, occur 0, normal 1)
         cols = df.columns[2:]
         kps = []
-        for i in cfg.LANDMARK_IDX[category]:
-            for j in range(2):
+        for i in range(cfg.NUM_LANDMARK):
+            for j in range(3):
                 kps.append(df[cols[i]].apply(lambda x: int(x.split('_')[j])).as_matrix())
-        kps = np.vstack(kps).T.reshape((len(self.img_lst), -1, 2)).astype(np.float)
+        kps = np.vstack(kps).T.reshape((len(self.img_lst), -1, 3)).astype(np.float)
         self.kps = kps
 
     def __getitem__(self, idx):
+        # meta
         img_path = os.path.join(self.img_dir, self.img_lst[idx])
         img = cv2.imread(img_path)
+        category = self.category[idx]
         kps = self.kps[idx].copy()
-        # t = draw_kps(img.copy(), kps)
-        # cv2.imshow('ori', t)
-        img, kps = transform(img, self.category, kps, self.is_train)
-        heatmap, paf = get_label(img, self.category, kps)
+        # transform
+        img, kps = transform(img, kps, self.is_train)
+        heatmap, paf, mask_heatmap, mask_paf = get_label(img, category, kps)
+        # preprocess
         img = process_cv_img(img)
         heatmap = heatmap.astype('float32')
         paf = paf.astype('float32')
-        return img, heatmap, paf
+        mask_heatmap = mask_heatmap.astype('float32')
+        mask_paf = mask_paf.astype('float32')
+        self.cur_kps = kps  # for debug and show
+        return img, heatmap, paf, mask_heatmap, mask_paf
 
     def __len__(self):
         return len(self.img_lst)
 
 
-def draw_kps(im, kps):
-    im = im.copy()
-    for (x, y) in kps:
-        x, y = int(x), int(y)
-        cv2.circle(im, (x, y), 2, (0, 0, 255), -1)
-    return im
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--category', type=str, default='skirt', choices=['blouse', 'skirt', 'outwear', 'dress', 'trousers'])
-    args = parser.parse_args()
     np.random.seed(0)
-    df = pd.read_csv('./data/train/Annotations/train.csv')
-    dataset = FashionAIKPSDataSet(df, args.category)
-    mean = np.array(cfg.PIXEL_MEAN, dtype='float32').reshape((3, 1, 1))
-    std = np.array(cfg.PIXEL_STD, dtype='float32').reshape((3, 1, 1))
-    np.random.seed(0)
+    df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train/Annotations/train.csv'))
+    dataset = FashionAIKPSDataSet(df)
     print(len(dataset))
-    for (data, heatmap, paf) in dataset:
-        #data, heatmap, paf = dataset[10]
-        img = (data * std + mean).astype('uint8').transpose((1, 2, 0))[:, :, ::-1]
+    for idx, (data, heatmap, paf, mask_heatmap, mask_paf) in enumerate(dataset):
+        #data, heatmap, paf, mask_heatmap, mask_paf = dataset[10]
+        img = reverse_to_cv_img(data)
         heatmap = heatmap[-1]
-        n, h, w = paf.shape
-        paf = paf.reshape((n // 2, 2, h, w))
-        paf = np.sqrt(np.square(paf[:, 0]) + np.square(paf[:, 1]))
-        paf = paf.max(axis=0)
+        kps = dataset.cur_kps
+        category = dataset.category[idx]
 
-        def draw(img, ht):
-            h, w = img.shape[:2]
-            ht = cv2.resize(ht, (w, h))
-            ht = (ht * 255).astype(np.uint8)
-            ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
-            drawed = cv2.addWeighted(img, 0.5, ht, 0.5, 0)
-            return drawed
+        dr1 = draw_heatmap(img, heatmap)
+        dr2 = draw_paf(img, paf)
+        dr3 = draw_kps(img, kps)
 
-        dr1 = draw(img, heatmap)
-        dr2 = draw(img, paf)
         cv2.imshow("heatmap", dr1)
         cv2.imshow("paf", dr2)
+        cv2.imshow("%s-kps"%category, dr3)
         key = cv2.waitKey(0)
         if key == 27:
             break

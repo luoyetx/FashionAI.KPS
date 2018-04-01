@@ -2,16 +2,29 @@ from __future__ import print_function, division
 
 import os
 os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT']='0'
-import time
 import argparse
 import cv2
 import mxnet as mx
 import numpy as np
 import pandas as pd
-from tensorboardX import SummaryWriter
+from dataset import FashionAIKPSDataSet
 from model import PoseNet
 from config import cfg
-from utils import draw_heatmap, draw_paf, draw_kps, parse_from_name, detect_kps, process_cv_img, get_logger
+from utils import draw_heatmap, draw_paf, draw_kps, process_cv_img, parse_from_name, detect_kps, get_logger
+
+
+def calc_error(kps_pred, kps_gt, category):
+    dist = lambda dx, dy: np.sqrt(np.square(dx) + np.square(dy))
+    idx1, idx2 = cfg.EVAL_NORMAL_IDX[category]
+    norm = dist(kps_gt[idx1, 0] - kps_gt[idx2, 0], kps_gt[idx2, 1] - kps_gt[idx2, 1])
+    keep = kps_gt[:, 2] == 1
+    kps_gt = kps_gt[keep]
+    kps_pred = kps_pred[keep]
+    error = dist(kps_pred[:, 0] - kps_gt[:, 0], kps_pred[:, 1] - kps_gt[:, 1]).mean()
+    if norm == 0:
+        norm = dist(kps_gt[0, 0] - kps_gt[1, 0], kps_gt[0, 1] - kps_gt[1, 1])
+    error /= norm
+    return error
 
 
 if __name__ == '__main__':
@@ -36,13 +49,15 @@ if __name__ == '__main__':
     net.load_params(args.model, mx.cpu(0))
     net.collect_params().reset_ctx(ctx)
     # data
-    df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
+    df = pd.read_csv(os.path.join(data_dir, 'val.csv'))
+    testdata = FashionAIKPSDataSet(df, False)
+    num = len(testdata)
     result = []
-    for i, row in df.iterrows():
-        img_id = row['image_id']
-        category = row['image_category']
-        path = os.path.join(data_dir, 'test', row['image_id'])
+    for i in range(num):
+        path = os.path.join(data_dir, 'train', testdata.img_lst[i])
         img = cv2.imread(path)
+        category = testdata.category[i]
+        kps_gt = testdata.kps[i]
         # predict
         data = process_cv_img(img)
         batch = mx.nd.array(data[np.newaxis], ctx)
@@ -51,9 +66,12 @@ if __name__ == '__main__':
         paf = out[-1][1][0].asnumpy()
         # detect kps
         kps_pred = detect_kps(img, heatmap, paf, category)
-        result.append((img_id, category, kps_pred))
+        # calc_error
+        error = calc_error(kps_pred, kps_gt, category)
+        result.append(error)
         if i % 100 == 0:
-            logger.info('Process %d samples', i + 1)
+            avg_error = np.array(result).mean()
+            logger.info('Eval %d samples, Avg Normalized Error: %f', i + 1, avg_error)
 
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
@@ -73,13 +91,5 @@ if __name__ == '__main__':
             if key == 27:
                 break
 
-    with open('./result/result.csv', 'w') as fout:
-        header = 'image_id,image_category,neckline_left,neckline_right,center_front,shoulder_left,shoulder_right,armpit_left,armpit_right,waistline_left,waistline_right,cuff_left_in,cuff_left_out,cuff_right_in,cuff_right_out,top_hem_left,top_hem_right,waistband_left,waistband_right,hemline_left,hemline_right,crotch,bottom_left_in,bottom_left_out,bottom_right_in,bottom_right_out\n'
-        fout.write(header)
-        for img_id, category, kps in result:
-            fout.write(img_id)
-            fout.write(',%s'%category)
-            for p in kps:
-                s=',%d_%d_%d'%(p[0], p[1], p[2])
-                fout.write(s)
-            fout.write('\n')
+    avg_error = np.array(result).mean()
+    logger.info('Total Avg Normalized Error: %f', avg_error)

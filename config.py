@@ -4,17 +4,11 @@ from mxnet import gluon as gl
 
 cfg = EasyDict()
 
-cfg.IMG_DIR = './data'
+cfg.DATA_DIR = './data'
+cfg.TRAIN_RATE = 0.9
 
-cfg.CATEGORY_2_IDX = {
-    'blouse': 0,
-    'skirt': 1,
-    'outwear': 2,
-    'dress': 3,
-    'trousers': 4
-}
-cfg.IDX_2_CATEGORY = ['blouse', 'skirt', 'outwear', 'dress', 'trousers']
-
+cfg.CATEGORY = ['blouse', 'skirt', 'outwear', 'dress', 'trousers']
+cfg.NUM_LANDMARK = 24
 cfg.LANDMARK_IDX = {
     'blouse': [0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14],
     'skirt': [15, 16, 17, 18],
@@ -22,31 +16,36 @@ cfg.LANDMARK_IDX = {
     'dress': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 17, 18],
     'trousers': [15, 16, 19, 20, 21, 22, 23],
 }
-cfg.LANDMARK_SWAP = {
-    'blouse': [(0, 1), (3, 4), (5, 6), (7, 9), (8, 10), (11, 12)],
-    'skirt': [(0, 1), (2, 3)],
-    'outwear': [(0, 1), (2, 3), (4, 5), (6, 7), (9, 11), (8, 10), (12, 13)],
-    'dress': [(0, 1), (3, 4), (5, 6), (7, 8), (10, 12), (9, 11), (13, 14)],
-    'trousers': [(0, 1), (4, 6), (3, 5)],
-}
-cfg.PAF_LANDMARK_PAIR = {
-    'blouse': [(2, 0), (2, 1), (0, 3), (3, 8), (8, 7), (7, 5), (5, 11), (1, 4), (4, 10), (10, 9), (9, 6), (6, 12)],
-    'skirt': [(0, 1), (0, 2), (1, 3)],
-    'outwear': [(0, 1), (1, 3), (3, 11), (11, 10), (10, 5), (5, 7), (5, 13), (7, 13), (0, 2), (2, 9), (9, 8), (8, 4), (4, 6), (4, 12), (6, 12)],
-    'dress': [(2, 0), (2, 1), (0, 3), (3, 10), (10, 9), (9, 5), (5, 7), (5, 13), (7, 13), (1, 4), (4, 12), (12, 11), (11, 6), (6, 8), (6, 14), (8, 14)],
-    'trousers': [(2, 0), (2, 1), (2, 3), (2, 5), (0, 4), (1, 6)],
-}
+cfg.LANDMARK_SWAP = [(0, 1), (3, 4), (5, 6), (10, 12), (9, 11), (7, 8), (13, 14), (15, 16), (17, 18), (21, 23), (20, 22),]
+cfg.PAF_LANDMARK_PAIR = [(0, 1), (0, 2), (0, 3),
+                         (1, 2), (1, 4),
+                         (2, 5), (2, 6),
+                         (3, 5), (3, 10),
+                         (4, 6), (4, 12),
+                         (5, 6), (5, 7), (5, 9), (5, 13),
+                         (6, 8), (6, 11), (6, 14),
+                         (7, 8), (7, 13),
+                         (8, 14),
+                         (9, 10),
+                         (11, 12),
+                         (13, 14),
+                         (15, 16), (15, 17), (15, 19), (15, 21),
+                         (16, 18), (16, 19), (16, 23),
+                         (17, 18),
+                         (19, 20), (19, 22),
+                         (20, 21),
+                         (22, 23),]
 
-cfg.SIGMA = 7
-cfg.THRE = 1
+cfg.HEATMAP_SIGMA = 7
+cfg.HEATMAP_THRES = 1
 cfg.STRIDE = 8
 cfg.CROP_SIZE = 368
-cfg.ROT_MAX = 20
+cfg.ROT_MAX = 30
 cfg.SCALE_MIN_RATE = 0.6
 cfg.SCALE_MAX_RATE = 1.1
 cfg.CROP_CENTER_OFFSET_MAX = 40
 
-cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]
+cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB
 cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 
 cfg.BACKBONE = {
@@ -55,13 +54,16 @@ cfg.BACKBONE = {
     'reset50': (gl.model_zoo.vision.resnet50_v2, '', []),
 }
 
-cfg.TEST_IMAGE = {
-    'blouse': [],
-    'skirt': 'train/Images/skirt/0010590c4110a37f76f109d079efd8ca.jpg',
-    'outwear': [],
-    'dress': [],
-    'trousers': []
+cfg.EVAL_NORMAL_IDX = {
+    'blouse': (5, 6),
+    'skirt': (15, 16),
+    'outwear': (5, 6),
+    'dress': (5, 6),
+    'trousers': (15, 16),
 }
 
 cfg.SCALE_MIN = cfg.CROP_SIZE * cfg.SCALE_MIN_RATE
 cfg.SCALE_MAX = cfg.CROP_SIZE * cfg.SCALE_MAX_RATE
+cfg.PIXEL_MEAN = np.array(cfg.PIXEL_MEAN, dtype='float32').reshape((3, 1, 1))
+cfg.PIXEL_STD = np.array(cfg.PIXEL_STD, dtype='float32').reshape((3, 1, 1))
+cfg.FILL_VALUE = [int(v*255) for v in cfg.PIXEL_MEAN.flatten()[::-1]]  # BGR for opencv
