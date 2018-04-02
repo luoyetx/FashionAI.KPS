@@ -91,14 +91,18 @@ def draw_paf(im, paf):
 
 
 def parse_from_name(name):
-    # name = /path/to/vgg16-S5-C64-BS16-adam-0100.params
+    # name = /path/to/default-vgg16-S5-C64-BS16-adam-0100.params
     name = os.path.basename(name)
     name = name.split('.')[0]
     ps = name.split('-')
-    backbone = ps[0]
-    stages = int(ps[1][1:])
-    channels = int(ps[2][1:])
-    return backbone, stages, channels
+    prefix = ps[0]
+    backbone = ps[1]
+    stages = int(ps[2][1:])
+    channels = int(ps[3][1:])
+    batch_size = int(ps[4][2:])
+    optim = ps[5]
+    epoch = int(ps[6])
+    return prefix, backbone, stages, channels, batch_size, optim, epoch
 
 def get_logger(name=None):
     logger = logging.getLogger(name)
@@ -114,12 +118,17 @@ def get_logger(name=None):
 def load_model(model):
     num_kps = cfg.NUM_LANDMARK
     num_limb = len(cfg.PAF_LANDMARK_PAIR)
-    backbone, cpm_stages, cpm_channels = parse_from_name(model)
+    prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name(model)
     net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
     creator, featname, fixed = cfg.BACKBONE[backbone]
     net.init_backbone(creator, featname, fixed)
     net.load_params(model, mx.cpu(0))
     return net
+
+
+def mkdir(path):
+    if not os.path.exists(path):
+        os.mkdir(path)
 
 
 def detect_kps(img, heatmap, paf, category):
@@ -213,21 +222,21 @@ def detect_kps(img, heatmap, paf, category):
             kps[j, 0] = cand[idx][0]
             kps[j, 1] = cand[idx][1]
             kps[j, 2] = 1
-    # cheat
-    keep = kps[:, 2] == 1
-    if keep.sum() != 0:
-        xmin = kps[keep, 0].min()
-        xmax = kps[keep, 0].max()
-        ymin = kps[keep, 1].min()
-        ymax = kps[keep, 1].max()
-        xc = (xmin + xmax) // 2
-        yc = (ymin + ymax) // 2
-    else:
-        xc = w // 2
-        yc = h // 2
-    for idx in landmark_idx:
-        if kps[idx, 2] == -1:
-            kps[idx, 0] = xc
-            kps[idx, 1] = yc
-            kps[idx, 2] = 0
+    # # cheat
+    # keep = kps[:, 2] == 1
+    # if keep.sum() != 0:
+    #     xmin = kps[keep, 0].min()
+    #     xmax = kps[keep, 0].max()
+    #     ymin = kps[keep, 1].min()
+    #     ymax = kps[keep, 1].max()
+    #     xc = (xmin + xmax) // 2
+    #     yc = (ymin + ymax) // 2
+    # else:
+    #     xc = w // 2
+    #     yc = h // 2
+    # for idx in landmark_idx:
+    #     if kps[idx, 2] == -1:
+    #         kps[idx, 0] = xc
+    #         kps[idx, 1] = yc
+    #         kps[idx, 2] = 0
     return kps

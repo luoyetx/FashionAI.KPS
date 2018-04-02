@@ -124,9 +124,10 @@ if __name__ == '__main__':
     parser.add_argument('--cpm-channels', type=int, default=64)
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='30,60')
-    parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg19'])
+    parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--start-epoch', type=int, default=1)
     parser.add_argument('--model-path', type=str, default='')
+    parser.add_argument('--prefix', type=str, default='default', help='model description')
     args = parser.parse_args()
     print(args)
     # seed
@@ -147,8 +148,9 @@ if __name__ == '__main__':
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
     start_epoch = args.start_epoch
+    prefix = args.prefix
     model_path = None if args.model_path == '' else args.model_path
-    base_name = '%s-S%d-C%d-BS%d-%s' % (backbone, cpm_stages, cpm_channels, batch_size, optim)
+    base_name = '%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, cpm_stages, cpm_channels, batch_size, optim)
     logger = get_logger()
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
@@ -182,12 +184,8 @@ if __name__ == '__main__':
         trainer = gl.trainer.Trainer(net.collect_params(), 'sgd', {'learning_rate': lr, 'wd': wd, 'momentum': 0.9, 'lr_scheduler': lr_scheduler})
     else:
         trainer = gl.trainer.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'wd': wd, 'lr_scheduler': lr_scheduler})
-    if start_epoch != 1:
-        trainer_path = './output/%s-%04d.states' % (base_name, start_epoch - 1)
-        logger.info('Load trainer from %s'%trainer_path)
-        trainer.load_states(trainer_path)
     # logger
-    log_dir = './log/%s' % base_name
+    log_dir = './log/%s'%base_name
     if os.path.exists(log_dir) and start_epoch == 1:
         shutil.rmtree(log_dir)
     writer = SummaryWriter(log_dir)
@@ -197,7 +195,7 @@ if __name__ == '__main__':
         rd2 = Recorder('p-%d' % i, freq)
         rds.append(rd1)
         rds.append(rd2)
-    # train model
+    # meta info
     if start_epoch == 1:
         global_step = 0
     else:
@@ -253,7 +251,4 @@ if __name__ == '__main__':
         logger.info('[Epoch %d] Saved to %s' % (epoch_idx + 1, save_path))
         save_path = './output/%s-%04d.params' % (base_name, epoch_idx + 1)
         net.save_params(save_path)
-        logger.info('[Epoch %d] Saved to %s' % (epoch_idx + 1, save_path))
-        save_path = './output/%s-%04d.states' % (base_name, epoch_idx + 1)
-        trainer.save_states(save_path)
         logger.info('[Epoch %d] Saved to %s' % (epoch_idx + 1, save_path))

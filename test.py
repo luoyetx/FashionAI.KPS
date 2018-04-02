@@ -13,7 +13,7 @@ from tensorboardX import SummaryWriter
 from model import PoseNet
 from config import cfg
 from utils import draw_heatmap, draw_paf, draw_kps
-from utils import detect_kps, process_cv_img, get_logger, load_model
+from utils import detect_kps, process_cv_img, get_logger, load_model, mkdir
 
 
 if __name__ == '__main__':
@@ -21,12 +21,14 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=int, default='0')
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--show', action='store_true')
+    parser.add_argument('--save', action='store_true')
     args = parser.parse_args()
     print(args)
     # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
     data_dir = cfg.DATA_DIR
     show = args.show
+    save = args.save
     logger = get_logger()
     # model
     net = load_model(args.model)
@@ -34,6 +36,10 @@ if __name__ == '__main__':
     net.hybridize()
     # data
     df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
+    base_name = './result/test'
+    mkdir(base_name)
+    for c in cfg.CATEGORY:
+        mkdir('%s/%s' % (base_name, c))
     result = []
     for i, row in df.iterrows():
         img_id = row['image_id']
@@ -46,6 +52,11 @@ if __name__ == '__main__':
         out = net(batch)
         heatmap = out[-1][0][0].asnumpy()
         paf = out[-1][1][0].asnumpy()
+        # save output
+        if save:
+            out_path = '%s/%s/%s.npy' % (base_name, category, os.path.basename(path).split('.')[0])
+            npy = np.concatenate([heatmap, paf])
+            np.save(out_path, npy)
         # detect kps
         kps_pred = detect_kps(img, heatmap, paf, category)
         result.append((img_id, category, kps_pred))
