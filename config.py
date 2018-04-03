@@ -49,9 +49,9 @@ cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB
 cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 
 cfg.BACKBONE = {
-    'vgg16': (gl.model_zoo.vision.vgg16, 'relu8', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'vgg19': (gl.model_zoo.vision.vgg19, 'relu9', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'reset50': (gl.model_zoo.vision.resnet50_v2, '', []),
+    'vgg16': (gl.model_zoo.vision.vgg16, 'relu8_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
+    'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v2, 'stage2__plus1', ['conv0']),
 }
 
 cfg.EVAL_NORMAL_IDX = {

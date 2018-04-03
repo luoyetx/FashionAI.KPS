@@ -60,19 +60,32 @@ class PoseNet(gl.HybridBlock):
     def init_backbone(self, creator, featname, fixed):
         with self.name_scope():
             backbone = creator(pretrained=True)
-            data = mx.sym.var('data')
-            out_name = '_'.join([backbone.name, featname, 'fwd_output'])
-            out = backbone(data).get_internals()[out_name]
             name = backbone.name
-            self.backbone = gl.SymbolBlock(out, data, params=backbone.collect_params())
             # hacking parameters
-            params = self.backbone.collect_params()
+            params = backbone.collect_params()
             for key, item in params.items():
                 should_fix = False
                 for pattern in fixed:
                     if name + '_' + pattern + '_' in key:
                         should_fix = True
                 if should_fix:
-                    print('fix', key)
+                    print('fix parameter', key)
                     item.grad_req = 'null'
             # special for batchnorm
+            freeze_bn(backbone.features)
+            # create symbol
+            data = mx.sym.var('data')
+            out_name = '_'.join([backbone.name, featname, 'output'])
+            out = backbone(data).get_internals()[out_name]
+            self.backbone = gl.SymbolBlock(out, data, params=backbone.collect_params())
+
+
+def freeze_bn(block):
+    if isinstance(block, nn.BatchNorm):
+        print('freeze batchnorm operator', block.name)
+        block._kwargs['use_global_stats'] = True
+        block.gamma.grad_req = 'null'
+        block.beta.grad_req = 'null'
+    else:
+        for child in block._children:
+            freeze_bn(child)

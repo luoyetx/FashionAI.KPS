@@ -18,7 +18,7 @@ from utils import process_cv_img, detect_kps, get_logger, load_model, mkdir
 def calc_error(kps_pred, kps_gt, category):
     dist = lambda dx, dy: np.sqrt(np.square(dx) + np.square(dy))
     idx1, idx2 = cfg.EVAL_NORMAL_IDX[category]
-    norm = dist(kps_gt[idx1, 0] - kps_gt[idx2, 0], kps_gt[idx2, 1] - kps_gt[idx2, 1])
+    norm = dist(kps_gt[idx1, 0] - kps_gt[idx2, 0], kps_gt[idx1, 1] - kps_gt[idx2, 1])
     if norm == 0:
         return -1
     keep = kps_gt[:, 2] == 1
@@ -37,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--save', action='store_true')
+    parser.add_argument('--use-cache', action='store_true')
     args = parser.parse_args()
     print(args)
     # hyper parameters
@@ -44,6 +45,7 @@ if __name__ == '__main__':
     data_dir = cfg.DATA_DIR
     show = args.show
     save = args.save
+    use_cache = args.use_cache
     logger = get_logger()
     # model
     net = load_model(args.model)
@@ -51,6 +53,7 @@ if __name__ == '__main__':
     net.hybridize()
     # data
     df = pd.read_csv(os.path.join(data_dir, 'val.csv'))
+    df = df.sort_values(by='image_category')
     testdata = FashionAIKPSDataSet(df, False)
     num = len(testdata)
     base_name = './result/val'
@@ -64,11 +67,19 @@ if __name__ == '__main__':
         category = testdata.category[i]
         kps_gt = testdata.kps[i]
         # predict
-        data = process_cv_img(img)
-        batch = mx.nd.array(data[np.newaxis], ctx)
-        out = net(batch)
-        heatmap = out[-1][0][0].asnumpy()
-        paf = out[-1][1][0].asnumpy()
+        if use_cache:
+            fn = os.path.basename(testdata.img_lst[i]).split('.')[0] + '.npy'
+            cache_path = os.path.join('./result/val/%s'%category, fn)
+            npy = np.load(cache_path)
+            num_ldm = cfg.NUM_LANDMARK
+            heatmap = npy[:num_ldm+1]
+            paf = npy[num_ldm+1:]
+        else:
+            data = process_cv_img(img)
+            batch = mx.nd.array(data[np.newaxis], ctx)
+            out = net(batch)
+            heatmap = out[-1][0][0].asnumpy()
+            paf = out[-1][1][0].asnumpy()
         # save output
         if save:
             out_path = '%s/%s/%s.npy' % (base_name, category, os.path.basename(path).split('.')[0])
@@ -82,6 +93,7 @@ if __name__ == '__main__':
             result.append(error)
         if i % 100 == 0:
             avg_error = np.array(result).mean()
+            logger.info('Category %s', category)
             logger.info('Eval %d samples, Avg Normalized Error: %f', i + 1, avg_error)
 
         if show:
@@ -93,11 +105,13 @@ if __name__ == '__main__':
             dr2 = draw_paf(img, paf)
             dr3 = draw_kps(img, kps_pred)
             dr4 = draw_heatmap(img, htall)
+            dr5 = draw_kps(img, kps_gt)
 
             cv2.imshow('heatmap', dr1)
             cv2.imshow('paf', dr2)
             cv2.imshow('detect', dr3)
             cv2.imshow('htall', dr4)
+            cv2.imshow('kps_gt', dr5)
             key = cv2.waitKey(0)
             if key == 27:
                 break
