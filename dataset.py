@@ -18,8 +18,6 @@ from heatmap import putGaussianMaps, putVecMaps
 
 def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
-    miss = kps[:, 2] == -1
-    update_miss = lambda kps: np.logical_or.reduce([kps[:, 0] < 0, kps[:, 1] < 0, kps[:, 0] > width, kps[:, 1] > height, miss])
     # flip
     if np.random.rand() > 0.5 and is_train:
         img = cv2.flip(img, 1)
@@ -42,7 +40,6 @@ def transform(img, kps, is_train=True):
         xy = kps[:, :2]
         xy = rot.dot(np.hstack([xy, np.ones((len(xy), 1))]).T).T
         kps[:, :2] = xy
-        miss = update_miss(kps)
     # scale
     scale = np.random.rand() * (cfg.SCALE_MAX - cfg.SCALE_MIN) + cfg.SCALE_MIN if is_train else cfg.CROP_SIZE
     max_edge = max(height, width)
@@ -63,9 +60,8 @@ def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
     kps[:, 0] -= x1
     kps[:, 1] -= y1
-    miss = update_miss(kps)
     # fill missing
-    kps[miss] = -1
+    kps[kps[:, 2] == -1, :2] = -1
     return img, kps
 
 

@@ -3,6 +3,7 @@ from __future__ import print_function, division
 import os
 os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT']='0'
 import argparse
+import pickle
 import cv2
 import mxnet as mx
 import numpy as np
@@ -53,14 +54,15 @@ if __name__ == '__main__':
     net.hybridize()
     # data
     df = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    df = df.sort_values(by='image_category')
+    #df = df.sort_values(by='image_category')
     testdata = FashionAIKPSDataSet(df, False)
     num = len(testdata)
     base_name = './result/val'
     mkdir(base_name)
     for c in cfg.CATEGORY:
         mkdir('%s/%s' % (base_name, c))
-    result = []
+    result = {k: [] for k in cfg.CATEGORY}
+    record = []
     for i in range(num):
         path = os.path.join(data_dir, 'train', testdata.img_lst[i])
         img = cv2.imread(path)
@@ -89,12 +91,19 @@ if __name__ == '__main__':
         kps_pred = detect_kps(img, heatmap, paf, category)
         # calc_error
         error = calc_error(kps_pred, kps_gt, category)
+        record.append((path, kps_gt, kps_pred, error))
         if error != -1:
-            result.append(error)
-        if i % 100 == 0:
-            avg_error = np.array(result).mean()
-            logger.info('Category %s', category)
-            logger.info('Eval %d samples, Avg Normalized Error: %f', i + 1, avg_error)
+            result[category].append(error)
+        if i % 100 == 99:
+            logger.info('Eval %d samples' % (i + 1))
+            sum_err, sum_num = 0, 0
+            for k in result:
+                if len(result[k]) != 0:
+                    err = np.array(result[k])
+                    logger.info('Average Error for %s: %f' % (k, err.mean()))
+                    sum_err += err.sum()
+                    sum_num += len(err)
+            logger.info('Average Error %f' % (sum_err / sum_num))
 
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
@@ -116,5 +125,13 @@ if __name__ == '__main__':
             if key == 27:
                 break
 
-    avg_error = np.array(result).mean()
-    logger.info('Total Avg Normalized Error: %f', avg_error)
+    logger.info('Total Eval %d samples' % num)
+    sum_err, sum_num = 0, 0
+    for k in result:
+        if len(result[k]) != 0:
+            err = np.array(result[k])
+            logger.info('Total Average Error for %s: %f' % (k, err.mean()))
+            sum_err += err.sum()
+            sum_num += len(err)
+    logger.info('Total Average Error %f' % (sum_err / sum_num))
+    pickle.dump([result, record], open('./result/eval_val.pkl', 'wb'))
