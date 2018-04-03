@@ -50,7 +50,7 @@ def transform(img, kps, is_train=True):
     # crop
     rand_x = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
     rand_y = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
-    center = (width // 2, height // 2)
+    center = (width // 2 + rand_x, height // 2 + rand_y)
     x1 = int(center[0] - cfg.CROP_SIZE / 2)
     y1 = int(center[1] - cfg.CROP_SIZE / 2)
     x2 = x1 + cfg.CROP_SIZE
