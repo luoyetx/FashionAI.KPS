@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 
 from dataset import FashionAIKPSDataSet
-from model import PoseNet
+from model import PoseNet, load_model
 from config import cfg
 from utils import draw_heatmap, draw_paf, draw_kps
-from utils import process_cv_img, detect_kps, get_logger, load_model, mkdir
+from utils import process_cv_img, detect_kps, get_logger, mkdir
 
 
 def calc_error(kps_pred, kps_gt, category):
@@ -77,11 +77,7 @@ if __name__ == '__main__':
             heatmap = npy[:num_ldm+1]
             paf = npy[num_ldm+1:]
         else:
-            data = process_cv_img(img)
-            batch = mx.nd.array(data[np.newaxis], ctx)
-            out = net(batch)
-            heatmap = out[-1][0][0].asnumpy()
-            paf = out[-1][1][0].asnumpy()
+            heatmap, paf = net.predict(img, ctx)
         # save output
         if save:
             out_path = '%s/%s/%s.npy' % (base_name, category, os.path.basename(path).split('.')[0])
@@ -95,15 +91,15 @@ if __name__ == '__main__':
         if error != -1:
             result[category].append(error)
         if i % 100 == 99:
-            logger.info('Eval %d samples' % (i + 1))
+            logger.info('Eval %d samples', i + 1)
             sum_err, sum_num = 0, 0
             for k in result:
-                if len(result[k]) != 0:
+                if result[k]:
                     err = np.array(result[k])
-                    logger.info('Average Error for %s: %f' % (k, err.mean()))
+                    logger.info('Average Error for %s: %f', k, err.mean())
                     sum_err += err.sum()
                     sum_num += len(err)
-            logger.info('Average Error %f' % (sum_err / sum_num))
+            logger.info('Average Error %f', sum_err / sum_num)
 
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
@@ -125,13 +121,13 @@ if __name__ == '__main__':
             if key == 27:
                 break
 
-    logger.info('Total Eval %d samples' % num)
+    logger.info('Total Eval %d samples', num)
     sum_err, sum_num = 0, 0
     for k in result:
         if len(result[k]) != 0:
             err = np.array(result[k])
-            logger.info('Total Average Error for %s: %f' % (k, err.mean()))
+            logger.info('Total Average Error for %s: %f', k, err.mean())
             sum_err += err.sum()
             sum_num += len(err)
-    logger.info('Total Average Error %f' % (sum_err / sum_num))
+    logger.info('Total Average Error %f', sum_err / sum_num)
     pickle.dump([result, record], open('./result/eval_val.pkl', 'wb'))

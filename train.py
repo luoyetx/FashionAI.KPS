@@ -15,9 +15,9 @@ import pandas as pd
 from tensorboardX import SummaryWriter
 
 from dataset import FashionAIKPSDataSet
-from model import PoseNet
+from model import PoseNet, load_model
 from config import cfg
-from utils import get_logger, load_model
+from utils import get_logger
 
 
 class Recorder(object):
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
     # model
-    if start_epoch == 1:
+    if start_epoch == 1 and not model_path:
         num_kps = cfg.NUM_LANDMARK
         num_limb = len(cfg.PAF_LANDMARK_PAIR)
         net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)

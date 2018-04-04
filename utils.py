@@ -10,8 +10,11 @@ import matplotlib
 matplotlib.use('Agg')
 import seaborn as sns
 
-from model import PoseNet
 from config import cfg
+
+import pyximport
+pyximport.install(setup_args={'include_dirs': np.get_include()})
+from heatmap import pickPeeks
 
 
 def process_cv_img(img):
@@ -93,7 +96,7 @@ def draw_paf(im, paf):
 def parse_from_name(name):
     # name = /path/to/default-vgg16-S5-C64-BS16-adam-0100.params
     name = os.path.basename(name)
-    name = name.split('.')[0]
+    name = os.path.splitext(name)[0]
     ps = name.split('-')
     prefix = ps[0]
     backbone = ps[1]
@@ -115,17 +118,6 @@ def get_logger(name=None):
     return logger
 
 
-def load_model(model):
-    num_kps = cfg.NUM_LANDMARK
-    num_limb = len(cfg.PAF_LANDMARK_PAIR)
-    prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name(model)
-    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
-    creator, featname, fixed = cfg.BACKBONE[backbone]
-    net.init_backbone(creator, featname, fixed)
-    net.load_params(model, mx.cpu(0))
-    return net
-
-
 def mkdir(path):
     if not os.path.exists(path):
         os.mkdir(path)
@@ -145,18 +137,11 @@ def detect_kps_v1(img, heatmap, paf, category):
     peaks = []
     heatmap = heatmap[:, :, landmark_idx]
     for i in range(num_ldm):
-        ht_ori = heatmap[: , :, i]
+        ht_ori = heatmap[:, :, i].astype('float64')
         ht = gaussian_filter(ht_ori, sigma=sigma)
-        ht_left = np.zeros(ht.shape)
-        ht_left[1:,:] = ht[:-1,:]
-        ht_right = np.zeros(ht.shape)
-        ht_right[:-1,:] = ht[1:,:]
-        ht_up = np.zeros(ht.shape)
-        ht_up[:,1:] = ht[:,:-1]
-        ht_down = np.zeros(ht.shape)
-        ht_down[:,:-1] = ht[:,1:]
-        peak_binary = np.logical_and.reduce((ht>ht_left, ht>ht_right, ht>ht_up, ht>ht_down, ht > thres1))
-        peak = zip(np.nonzero(peak_binary)[1], np.nonzero(peak_binary)[0]) # note reverse
+        mask = np.zeros_like(ht)
+        pickPeeks(ht, mask, thres1)
+        peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
         peak_with_score_links = [[x[0], x[1], ht_ori[x[1], x[0]], 0, 0] for x in peak]
         peaks.append(peak_with_score_links)
     # connection
@@ -350,4 +335,58 @@ def detect_kps_v2(img, heatmap, paf, category):
     return kps
 
 
-detect_kps = detect_kps_v2
+def detect_kps_v3(img, heatmap, paf, category):
+    h, w = img.shape[:2]
+    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
+    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h))
+    landmark_idx = cfg.LANDMARK_IDX[category]
+    num_ldm = cfg.NUM_LANDMARK
+    sigma = 1
+    thres1 = 0.1
+    num_mid = 10
+    thres2 = 0.05
+    # peaks
+    kps = np.zeros((num_ldm, 3))
+    kps[:] = -1
+    for idx in landmark_idx:
+        ht_ori = heatmap[: , :, idx]
+        ht = gaussian_filter(ht_ori, sigma=sigma)
+        ht_left = np.zeros(ht.shape)
+        ht_left[1:,:] = ht[:-1,:]
+        ht_right = np.zeros(ht.shape)
+        ht_right[:-1,:] = ht[1:,:]
+        ht_up = np.zeros(ht.shape)
+        ht_up[:,1:] = ht[:,:-1]
+        ht_down = np.zeros(ht.shape)
+        ht_down[:,:-1] = ht[:,1:]
+        peak_binary = np.logical_and.reduce((ht>ht_left, ht>ht_right, ht>ht_up, ht>ht_down, ht > thres1))
+        peak = zip(np.nonzero(peak_binary)[1], np.nonzero(peak_binary)[0]) # note reverse
+        peak = np.array([[x[0], x[1], ht_ori[x[1], x[0]]] for x in peak])
+        if (len(peak) == 0):
+            continue
+        peak = peak[np.argsort(peak[:, 2])[::-1]]
+        x, y, s = peak[0]
+        kps[idx, 0] = x
+        kps[idx, 1] = y
+        kps[idx, 2] = 1
+    # cheat
+    keep = kps[:, 2] == 1
+    if keep.sum() != 0:
+        xmin = kps[keep, 0].min()
+        xmax = kps[keep, 0].max()
+        ymin = kps[keep, 1].min()
+        ymax = kps[keep, 1].max()
+        xc = (xmin + xmax) // 2
+        yc = (ymin + ymax) // 2
+    else:
+        xc = w // 2
+        yc = h // 2
+    for idx in landmark_idx:
+        if kps[idx, 2] == -1:
+            kps[idx, 0] = xc
+            kps[idx, 1] = yc
+            kps[idx, 2] = 0
+    return kps
+
+
+detect_kps = detect_kps_v1

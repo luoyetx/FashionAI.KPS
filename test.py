@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
-from model import PoseNet
+from model import PoseNet, load_model
 from config import cfg
 from utils import draw_heatmap, draw_paf, draw_kps
-from utils import detect_kps, process_cv_img, get_logger, load_model, mkdir
+from utils import detect_kps, process_cv_img, get_logger, mkdir
 
 
 if __name__ == '__main__':
@@ -47,11 +47,7 @@ if __name__ == '__main__':
         path = os.path.join(data_dir, 'test', row['image_id'])
         img = cv2.imread(path)
         # predict
-        data = process_cv_img(img)
-        batch = mx.nd.array(data[np.newaxis], ctx)
-        out = net(batch)
-        heatmap = out[-1][0][0].asnumpy()
-        paf = out[-1][1][0].asnumpy()
+        heatmap, paf = net.predict(img, ctx)
         # save output
         if save:
             out_path = '%s/%s/%s.npy' % (base_name, category, os.path.basename(path).split('.')[0])

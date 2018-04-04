@@ -1,7 +1,6 @@
 from __future__ import print_function, division
 
 import os
-import argparse
 import cv2
 import mxnet as mx
 from mxnet import gluon as gl
@@ -14,6 +13,17 @@ from utils import process_cv_img, reverse_to_cv_img, crop_patch, draw_heatmap, d
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
 from heatmap import putGaussianMaps, putVecMaps
+
+
+def get_center(kps):
+    keep = kps[:, 2] != 0
+    xmin = kps[keep, 0].min()
+    xmax = kps[keep, 0].max()
+    ymin = kps[keep, 1].min()
+    ymax = kps[keep, 1].max()
+    xc = (xmin + xmax) / 2
+    yc = (ymin + ymax) / 2
+    return (xc, yc)
 
 
 def transform(img, kps, is_train=True):
@@ -50,7 +60,8 @@ def transform(img, kps, is_train=True):
     # crop
     rand_x = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
     rand_y = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
-    center = (width // 2 + rand_x, height // 2 + rand_y)
+    center = get_center(kps)
+    center = (center[0] + rand_x, center[1] + rand_y)
     x1 = int(center[0] - cfg.CROP_SIZE / 2)
     y1 = int(center[1] - cfg.CROP_SIZE / 2)
     x2 = x1 + cfg.CROP_SIZE
@@ -139,7 +150,7 @@ class FashionAIKPSDataSet(gl.data.Dataset):
 
 if __name__ == '__main__':
     np.random.seed(0)
-    df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train/Annotations/train.csv'))
+    df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
     dataset = FashionAIKPSDataSet(df)
     print(len(dataset))
     for idx, (data, heatmap, paf, mask_heatmap, mask_paf) in enumerate(dataset):

@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 from dataset import FashionAIKPSDataSet
-from model import PoseNet
-from utils import reverse_to_cv_img, draw_heatmap, draw_paf, draw_kps, parse_from_name, detect_kps, load_model
+from model import PoseNet, load_model
+from utils import reverse_to_cv_img, draw_heatmap, draw_paf, draw_kps, parse_from_name, detect_kps
 from config import cfg
 
 
@@ -43,9 +43,7 @@ if __name__ == '__main__':
     data, heatmap, paf, heatmap_mask, paf_mask = testdata[test_idx]
     kps_gt = testdata.cur_kps
     img = reverse_to_cv_img(data)
-    out = net(mx.nd.array(data[np.newaxis], ctx))
-    out_heatmap = out[-1][0][0].asnumpy()
-    out_paf = out[-1][1][0].asnumpy()
+    out_heatmap, out_paf = net.predict(img, ctx)
     kps_pred = detect_kps(img, out_heatmap, out_paf, category)
 
     # render
