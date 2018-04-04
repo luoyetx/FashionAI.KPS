@@ -12,7 +12,7 @@ from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 import numpy as np
 import pandas as pd
-from tensorboardX import SummaryWriter
+from mxboard import SummaryWriter
 
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, load_model
@@ -70,7 +70,7 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
+def forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
     data = gl.utils.split_and_load(data, ctx)
     heatmap = gl.utils.split_and_load(heatmap, ctx)
     heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
@@ -83,7 +83,8 @@ def forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_tr
         # forward
         out_ = net(data_)
         losses_ = []
-        for i in range(cpm_stages):
+        num_stages = len(out_)
+        for i in range(num_stages):
             out_[i][0] = nd.elemwise_mul(out_[i][0], heatmap_mask_)
             out_[i][1] = nd.elemwise_mul(out_[i][1], paf_mask_)
             heatmap_ = nd.elemwise_mul(heatmap_, heatmap_mask_)
@@ -110,7 +111,7 @@ def reduce_losses(losses):
     return ret
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--epoches', type=int, default=100)
@@ -188,7 +189,9 @@ if __name__ == '__main__':
     log_dir = './log/%s'%base_name
     if os.path.exists(log_dir) and start_epoch == 1:
         shutil.rmtree(log_dir)
-    writer = SummaryWriter(log_dir)
+    sw = SummaryWriter(log_dir)
+    net(mx.nd.zeros(shape=(1, 3, 368, 368), ctx=ctx[0]))
+    sw.add_graph(net)
     rds = []
     for i in range(cpm_stages):
         rd1 = Recorder('h-%d' % i, freq)
@@ -209,10 +212,10 @@ if __name__ == '__main__':
         tic = time.time()
         for rd in rds:
             rd.reset()
-        writer.add_scalar('lr', trainer.learning_rate, global_step)
+        sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
-            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
+            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -221,34 +224,38 @@ if __name__ == '__main__':
             if batch_idx % freq == freq - 1:
                 for rd in rds:
                     name, value = rd.get()
-                    writer.add_scalar('train/' + name, value, global_step)
-                    logger.info('[Epoch %d][Batch %d] %s = %f' % (epoch_idx + 1, batch_idx + 1, name, value))
+                    sw.add_scalar('train/' + name, value, global_step)
+                    logger.info('[Epoch %d][Batch %d] %s = %f', epoch_idx + 1, batch_idx + 1, name, value)
                 global_step += 1
                 toc = time.time()
                 speed = (batch_idx + 1) * batch_size / (toc - tic)
-                logger.info('[Epoch %d][Batch %d] Speed = %.2f sample/sec' % (epoch_idx + 1, batch_idx + 1, speed))
+                logger.info('[Epoch %d][Batch %d] Speed = %.2f sample/sec', epoch_idx + 1, batch_idx + 1, speed)
         toc = time.time()
-        logger.info('[Epoch %d] Global step %d' % (epoch_idx + 1, global_step - 1))
-        logger.info('[Epoch %d] Train Cost %.0f sec' % (epoch_idx + 1, toc - tic))
+        logger.info('[Epoch %d] Global step %d', epoch_idx + 1, global_step - 1)
+        logger.info('[Epoch %d] Train Cost %.0f sec', epoch_idx + 1, toc - tic)
         # test part
         tic = time.time()
         for rd in rds:
             rd.reset()
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(testloader):
-            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
+            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
         for rd in rds:
             name, value = rd.get()
-            writer.add_scalar('test/' + name, value, global_step)
-            logger.info('[Epoch %d][Test] %s = %f' % (epoch_idx + 1, name, value))
+            sw.add_scalar('test/' + name, value, global_step)
+            logger.info('[Epoch %d][Test] %s = %f', epoch_idx + 1, name, value)
         toc = time.time()
-        logger.info('[Epoch %d] Test Cost %.0f sec' % (epoch_idx + 1, toc - tic))
+        logger.info('[Epoch %d] Test Cost %.0f sec', epoch_idx + 1, toc - tic)
         # save part
         save_path = './output/%s-%04d.meta' % (base_name, epoch_idx + 1)
         pickle.dump(global_step, open(save_path, 'wb'))
-        logger.info('[Epoch %d] Saved to %s' % (epoch_idx + 1, save_path))
+        logger.info('[Epoch %d] Saved to %s', epoch_idx + 1, save_path)
         save_path = './output/%s-%04d.params' % (base_name, epoch_idx + 1)
         net.save_params(save_path)
-        logger.info('[Epoch %d] Saved to %s' % (epoch_idx + 1, save_path))
+        logger.info('[Epoch %d] Saved to %s', epoch_idx + 1, save_path)
+
+
+if __name__ == '__main__':
+    main()

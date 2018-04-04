@@ -101,9 +101,18 @@ class PoseNet(gl.HybridBlock):
 
     def predict(self, img, ctx):
         data = process_cv_img(img)
-        batch = mx.nd.array(data[np.newaxis], ctx)
+        data_flip = data[:, :, ::-1]
+        data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
+        batch = mx.nd.array(data, ctx)
         out = self(batch)
         heatmap = out[-1][0][0].asnumpy()
+        heatmap_flip = out[-1][0][1].asnumpy()
+        for x, y in cfg.LANDMARK_SWAP:
+            tmp = heatmap_flip[x].copy()
+            heatmap_flip[x] = heatmap_flip[y]
+            heatmap_flip[y] = tmp
+        heatmap_flip[-1, :, :] = heatmap_flip[-1, :, ::-1].copy()
+        heatmap = (heatmap + heatmap_flip) / 2
         paf = out[-1][1][0].asnumpy()
         return heatmap, paf
 
@@ -161,13 +170,32 @@ class CPNRefineBlock(gl.HybridBlock):
     def __init__(self, num_kps, num_channel):
         self.num_kps = num_kps
         self.num_channel = num_channel
-        pass
+        with self.name_scope():
+            self.P16 = nn.HybridSequential()
+            self.P16.add(self.bottleneck(), self.bottleneck(), self.bottleneck())
+            self.P8 = nn.HybridSequential()
+            self.P8.add(self.bottleneck(), self.bottleneck())
+            self.P4 = nn.HybridSequential()
+            self.P4.add(self.bottleneck())
+            self.R = nn.Conv2D(self.num_kps, 3, 1, 1)
 
-    def block(self):
+    def hybrid_forward(self, F, x):
+        F4, F8, F16 = x
+        F4 = self.P4(F4)
+        F8 = self.P8(F8)
+        F16 = self.P16(F16)
+        U16 = F.UpSampling(F16, scale=4, sample_type='nearest')
+        U16 = F.Crop(U16, F4)
+        U8 = F.UpSampling(F8, scale=2, sample_type='nearest')
+        U8 = F.Crop(U8, F4)
+        out = self.R(F.concat(F4, U8, U16))
+        return out
+
+    def bottleneck(self):
         net = nn.HybridSequential()
         with net.name_scope():
             net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
-            net.add()
+            net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
         return net
 
 

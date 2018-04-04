@@ -148,7 +148,7 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         return len(self.img_lst)
 
 
-if __name__ == '__main__':
+def main():
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
     dataset = FashionAIKPSDataSet(df)
@@ -170,3 +170,7 @@ if __name__ == '__main__':
         key = cv2.waitKey(0)
         if key == 27:
             break
+
+
+if __name__ == '__main__':
+    main()

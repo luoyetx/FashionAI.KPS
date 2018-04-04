@@ -240,18 +240,11 @@ def detect_kps_v2(img, heatmap, paf, category):
     # peaks
     peaks = []
     for i in range(num_ldm):
-        ht_ori = heatmap[: , :, i]
+        ht_ori = heatmap[:, :, i].astype('float64')
         ht = gaussian_filter(ht_ori, sigma=sigma)
-        ht_left = np.zeros(ht.shape)
-        ht_left[1:,:] = ht[:-1,:]
-        ht_right = np.zeros(ht.shape)
-        ht_right[:-1,:] = ht[1:,:]
-        ht_up = np.zeros(ht.shape)
-        ht_up[:,1:] = ht[:,:-1]
-        ht_down = np.zeros(ht.shape)
-        ht_down[:,:-1] = ht[:,1:]
-        peak_binary = np.logical_and.reduce((ht>ht_left, ht>ht_right, ht>ht_up, ht>ht_down, ht > thres1))
-        peak = zip(np.nonzero(peak_binary)[1], np.nonzero(peak_binary)[0]) # note reverse
+        mask = np.zeros_like(ht)
+        pickPeeks(ht, mask, thres1)
+        peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
         peak_with_score_links = [[x[0], x[1], ht_ori[x[1], x[0]], 0, 0] for x in peak]
         peaks.append(peak_with_score_links)
     # connection
@@ -349,18 +342,11 @@ def detect_kps_v3(img, heatmap, paf, category):
     kps = np.zeros((num_ldm, 3))
     kps[:] = -1
     for idx in landmark_idx:
-        ht_ori = heatmap[: , :, idx]
+        ht_ori = heatmap[:, :, idx].astype('float64')
         ht = gaussian_filter(ht_ori, sigma=sigma)
-        ht_left = np.zeros(ht.shape)
-        ht_left[1:,:] = ht[:-1,:]
-        ht_right = np.zeros(ht.shape)
-        ht_right[:-1,:] = ht[1:,:]
-        ht_up = np.zeros(ht.shape)
-        ht_up[:,1:] = ht[:,:-1]
-        ht_down = np.zeros(ht.shape)
-        ht_down[:,:-1] = ht[:,1:]
-        peak_binary = np.logical_and.reduce((ht>ht_left, ht>ht_right, ht>ht_up, ht>ht_down, ht > thres1))
-        peak = zip(np.nonzero(peak_binary)[1], np.nonzero(peak_binary)[0]) # note reverse
+        mask = np.zeros_like(ht)
+        pickPeeks(ht, mask, thres1)
+        peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
         peak = np.array([[x[0], x[1], ht_ori[x[1], x[0]]] for x in peak])
         if (len(peak) == 0):
             continue

@@ -15,7 +15,7 @@ from utils import reverse_to_cv_img, draw_heatmap, draw_paf, draw_kps, parse_fro
 from config import cfg
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default='0')
     parser.add_argument('--model', type=str, required=True)
@@ -74,3 +74,7 @@ if __name__ == '__main__':
     cv2.imshow('pred_kps', dr6)
     cv2.imshow('ori_kps', dr7)
     cv2.waitKey(0)
+
+
+if __name__ == '__main__':
+    main()

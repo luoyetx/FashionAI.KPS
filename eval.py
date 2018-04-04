@@ -32,7 +32,7 @@ def calc_error(kps_pred, kps_gt, category):
     return error
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default='0')
     parser.add_argument('--model', type=str, required=True)
@@ -131,3 +131,7 @@ if __name__ == '__main__':
             sum_num += len(err)
     logger.info('Total Average Error %f', sum_err / sum_num)
     pickle.dump([result, record], open('./result/eval_val.pkl', 'wb'))
+
+
+if __name__ == '__main__':
+    main()
