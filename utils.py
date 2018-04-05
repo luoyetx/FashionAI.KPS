@@ -318,7 +318,7 @@ def detect_kps_v2(img, heatmap, paf, category):
     return kps
 
 
-def detect_kps_v3(img, heatmap, paf, category):
+def detect_kps_v3(img, heatmap, category):
     h, w = img.shape[:2]
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
     landmark_idx = cfg.LANDMARK_IDX[category]

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
-from dataset_v3 import FashionAIKPSDataSet
+from dataset import FashionAIKPSDataSet
 from model import PoseNet, CascadePoseNet
 from config import cfg
 from utils import get_logger
@@ -148,8 +148,8 @@ def main():
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    traindata = FashionAIKPSDataSet(df_train, True)
-    testdata = FashionAIKPSDataSet(df_test, False)
+    traindata = FashionAIKPSDataSet(df_train, version=3, is_train=True)
+    testdata = FashionAIKPSDataSet(df_test, version=3, is_train=False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
