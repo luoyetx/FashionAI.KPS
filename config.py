@@ -46,12 +46,12 @@ cfg.CROP_CENTER_OFFSET_MAX = 40
 cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB
 cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 
-cfg.BACKBONE = {
+cfg.BACKBONE_v2 = {
     'vgg16': (gl.model_zoo.vision.vgg16, 'relu8_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
     'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
 }
 
-cfg.BACKBONE_V3 = {
+cfg.BACKBONE_v3 = {
     'resnet50': (gl.model_zoo.vision.resnet50_v2, ['stage1__plus2', 'stage2__plus3', 'stage3__plus5'], ['conv0']),
 }
 

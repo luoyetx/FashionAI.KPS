@@ -100,12 +100,25 @@ class PoseNet(gl.HybridBlock):
     def init_backbone(self, creator, featname, fixed):
         install_backbone(self, creator, [featname], fixed)
 
-    def predict(self, img, ctx):
+    def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
-        batch = mx.nd.array(data[np.newaxis], ctx)
+        if flip:
+            data_flip = data[:, :, ::-1]
+            data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
+        else:
+            data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
         out = self(batch)
         heatmap = out[-1][0][0].asnumpy()
         paf = out[-1][1][0].asnumpy()
+        if flip:
+            heatmap_flip = out[-1][0][1].asnumpy()
+            heatmap_flip = heatmap_flip[:, :, ::-1]
+            for i, j in cfg.LANDMARK_SWAP:
+                tmp = heatmap_flip[i].copy()
+                heatmap_flip[i] = heatmap_flip[j]
+                heatmap_flip[j] = tmp
+            heatmap = (heatmap + heatmap_flip) / 2
         return heatmap, paf
 
 
@@ -203,11 +216,24 @@ class CascadePoseNet(gl.HybridBlock):
         assert len(featnames) == 3
         install_backbone(self, creator, featnames, fixed)
 
-    def predict(self, img, ctx):
+    def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
-        batch = mx.nd.array(data[np.newaxis], ctx=ctx)
+        if flip:
+            data_flip = data[:, :, ::-1]
+            data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
+        else:
+            data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
         global_pred, refine_pred = self(batch)
         heatmap = refine_pred[0].asnumpy()
+        if flip:
+            heatmap_flip = refine_pred[1].asnumpy()
+            heatmap_flip = heatmap_flip[:, :, ::-1]
+            for i, j in cfg.LANDMARK_SWAP:
+                tmp = heatmap_flip[i].copy()
+                heatmap_flip[i] = heatmap_flip[j]
+                heatmap_flip[j] = tmp
+            heatmap = (heatmap + heatmap_flip) / 2
         return heatmap
 
 
@@ -247,11 +273,11 @@ def load_model(model, version=2):
     if version == 2:
         prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
         net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
-        creator, featname, fixed = cfg.BACKBONE[backbone]
+        creator, featname, fixed = cfg.BACKBONE_v2[backbone]
     else:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
-        creator, featname, fixed = cfg.BACKBONE_V3[backbone]
+        creator, featname, fixed = cfg.BACKBONE_v3[backbone]
     net.init_backbone(creator, featname, fixed)
     net.load_params(model, mx.cpu(0))
     return net

@@ -143,7 +143,7 @@ def main():
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
     prefix = args.prefix
-    base_name = '%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
+    base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     logger = get_logger()
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
@@ -156,7 +156,7 @@ def main():
     # model
     num_kps = cfg.NUM_LANDMARK
     net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
-    creator, featname, fixed = cfg.BACKBONE[backbone]
+    creator, featname, fixed = cfg.BACKBONE_v3[backbone]
     net.init_backbone(creator, featname, fixed)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
