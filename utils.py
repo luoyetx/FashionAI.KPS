@@ -72,12 +72,16 @@ def draw_kps(im, kps):
     return im
 
 
-def draw_heatmap(im, ht):
+def draw_heatmap(im, ht, resize_im=False):
     assert len(ht.shape) == 2, ht.shape
-    h, w = im.shape[:2]
-    ht = cv2.resize(ht, (w, h))
-    ht[ht < 0] = 0
-    ht[ht > 1] = 1
+    if resize_im:
+        h, w = ht.shape
+        im = cv2.resize(im, (w, h))
+    else:
+        h, w = im.shape[:2]
+        ht = cv2.resize(ht, (w, h))
+        ht[ht < 0] = 0
+        ht[ht > 1] = 1
     ht = (ht * 255).astype(np.uint8)
     ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
     drawed = cv2.addWeighted(im, 0.5, ht, 0.5, 0)
@@ -92,20 +96,6 @@ def draw_paf(im, paf):
     paf = paf.max(axis=0)
     return draw_heatmap(im, paf)
 
-
-def parse_from_name(name):
-    # name = /path/to/default-vgg16-S5-C64-BS16-adam-0100.params
-    name = os.path.basename(name)
-    name = os.path.splitext(name)[0]
-    ps = name.split('-')
-    prefix = ps[0]
-    backbone = ps[1]
-    stages = int(ps[2][1:])
-    channels = int(ps[3][1:])
-    batch_size = int(ps[4][2:])
-    optim = ps[5]
-    epoch = int(ps[6])
-    return prefix, backbone, stages, channels, batch_size, optim, epoch
 
 def get_logger(name=None):
     logger = logging.getLogger(name)
@@ -331,13 +321,10 @@ def detect_kps_v2(img, heatmap, paf, category):
 def detect_kps_v3(img, heatmap, paf, category):
     h, w = img.shape[:2]
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
-    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h))
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = cfg.NUM_LANDMARK
     sigma = 1
     thres1 = 0.1
-    num_mid = 10
-    thres2 = 0.05
     # peaks
     kps = np.zeros((num_ldm, 3))
     kps[:] = -1
@@ -348,7 +335,7 @@ def detect_kps_v3(img, heatmap, paf, category):
         pickPeeks(ht, mask, thres1)
         peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
         peak = np.array([[x[0], x[1], ht_ori[x[1], x[0]]] for x in peak])
-        if (len(peak) == 0):
+        if len(peak) == 0:
             continue
         peak = peak[np.argsort(peak[:, 2])[::-1]]
         x, y, s = peak[0]

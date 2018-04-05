@@ -11,7 +11,7 @@ import pandas as pd
 
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, load_model
-from utils import reverse_to_cv_img, draw_heatmap, draw_paf, draw_kps, parse_from_name, detect_kps
+from utils import reverse_to_cv_img, draw_heatmap, draw_paf, draw_kps, detect_kps
 from config import cfg
 
 
@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--test-idx', type=int, default=0)
+    parser.add_argument('--version', type=int, default=2)
     args = parser.parse_args()
     print(args)
     # seed
@@ -28,10 +29,11 @@ def main():
     np.random.seed(args.seed)
     # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
+    version = args.version
     data_dir = cfg.DATA_DIR
     test_idx = args.test_idx
     # model
-    net = load_model(args.model)
+    net = load_model(args.model, version)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     # data

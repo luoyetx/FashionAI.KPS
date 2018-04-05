@@ -36,9 +36,7 @@ cfg.PAF_LANDMARK_PAIR = [(0, 1), (0, 2), (0, 3),
                          (20, 21),
                          (22, 23),]
 
-cfg.HEATMAP_SIGMA = 7
 cfg.HEATMAP_THRES = 1
-cfg.STRIDE = 8
 cfg.CROP_SIZE = 368
 cfg.ROT_MAX = 40
 cfg.SCALE_MIN_RATE = 0.6
@@ -51,7 +49,10 @@ cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 cfg.BACKBONE = {
     'vgg16': (gl.model_zoo.vision.vgg16, 'relu8_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
     'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'resnet50': (gl.model_zoo.vision.resnet50_v2, 'stage2__plus1', ['conv0']),
+}
+
+cfg.BACKBONE_V3 = {
+    'resnet50': (gl.model_zoo.vision.resnet50_v2, ['stage1__plus2', 'stage2__plus3', 'stage3__plus5'], ['conv0']),
 }
 
 cfg.EVAL_NORMAL_IDX = {

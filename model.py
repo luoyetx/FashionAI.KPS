@@ -1,12 +1,13 @@
 from __future__ import print_function, division
 
+import os
 import numpy as np
 import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
 from config import cfg
-from utils import process_cv_img, parse_from_name
+from utils import process_cv_img
 
 
 def freeze_bn(block):
@@ -101,31 +102,12 @@ class PoseNet(gl.HybridBlock):
 
     def predict(self, img, ctx):
         data = process_cv_img(img)
-        data_flip = data[:, :, ::-1]
-        data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
-        batch = mx.nd.array(data, ctx)
+        batch = mx.nd.array(data[np.newaxis], ctx)
         out = self(batch)
         heatmap = out[-1][0][0].asnumpy()
-        heatmap_flip = out[-1][0][1].asnumpy()
-        for x, y in cfg.LANDMARK_SWAP:
-            tmp = heatmap_flip[x].copy()
-            heatmap_flip[x] = heatmap_flip[y]
-            heatmap_flip[y] = tmp
-        heatmap_flip[-1, :, :] = heatmap_flip[-1, :, ::-1].copy()
-        heatmap = (heatmap + heatmap_flip) / 2
         paf = out[-1][1][0].asnumpy()
         return heatmap, paf
 
-
-def load_model(model):
-    num_kps = cfg.NUM_LANDMARK
-    num_limb = len(cfg.PAF_LANDMARK_PAIR)
-    prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name(model)
-    net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
-    creator, featname, fixed = cfg.BACKBONE[backbone]
-    net.init_backbone(creator, featname, fixed)
-    net.load_params(model, mx.cpu(0))
-    return net
 
 
 class CPNGlobalBlock(gl.HybridBlock):
@@ -141,8 +123,8 @@ class CPNGlobalBlock(gl.HybridBlock):
             self.T8 = nn.Conv2D(self.num_kps, 3, 1, 1)  # 1/16 -> 1/8
             self.T4 = nn.Conv2D(self.num_kps, 3, 1, 1)  # 1/8 -> 1/4
 
-    def hybrid_forward(self, F, x):
-        F4, F8, F16 = x
+    def hybrid_forward(self, F, x4, x8, x16):
+        F4, F8, F16 = x4, x8, x16
         # 1/16
         R16 = self.P16(F16)
         # 1/8
@@ -168,6 +150,7 @@ class CPNGlobalBlock(gl.HybridBlock):
 class CPNRefineBlock(gl.HybridBlock):
 
     def __init__(self, num_kps, num_channel):
+        super(CPNRefineBlock, self).__init__()
         self.num_kps = num_kps
         self.num_channel = num_channel
         with self.name_scope():
@@ -179,8 +162,8 @@ class CPNRefineBlock(gl.HybridBlock):
             self.P4.add(self.bottleneck())
             self.R = nn.Conv2D(self.num_kps, 3, 1, 1)
 
-    def hybrid_forward(self, F, x):
-        F4, F8, F16 = x
+    def hybrid_forward(self, F, x4, x8, x16):
+        F4, F8, F16 = x4, x8, x16
         F4 = self.P4(F4)
         F8 = self.P8(F8)
         F16 = self.P16(F16)
@@ -212,10 +195,63 @@ class CascadePoseNet(gl.HybridBlock):
 
     def hybrid_forward(self, F, x):
         feats = self.backbone(x)  # pylint: disable=not-callable
-        global_pred = self.global_net(feats)
-        refine_pred = self.refine_net(global_pred)
+        global_pred = self.global_net(*feats)
+        refine_pred = self.refine_net(*global_pred)
         return global_pred, refine_pred
 
     def init_backbone(self, creator, featnames, fixed):
         assert len(featnames) == 3
         install_backbone(self, creator, featnames, fixed)
+
+    def predict(self, img, ctx):
+        data = process_cv_img(img)
+        batch = mx.nd.array(data[np.newaxis], ctx=ctx)
+        global_pred, refine_pred = self(batch)
+        heatmap = refine_pred[0].asnumpy()
+        return heatmap
+
+
+
+def parse_from_name_v2(name):
+    # name = /path/to/V2.default-vgg16-S5-C64-BS16-adam-0100.params
+    name = os.path.basename(name)
+    name = os.path.splitext(name)[0]
+    ps = name.split('-')
+    prefix = ps[0]
+    backbone = ps[1]
+    stages = int(ps[2][1:])
+    channels = int(ps[3][1:])
+    batch_size = int(ps[4][2:])
+    optim = ps[5]
+    epoch = int(ps[6])
+    return prefix, backbone, stages, channels, batch_size, optim, epoch
+
+
+def parse_from_name_v3(name):
+    # name = /path/to/V3.default-resnet50-C64-BS16-adam-0100.params
+    name = os.path.basename(name)
+    name = os.path.splitext(name)[0]
+    ps = name.split('-')
+    prefix = ps[0]
+    backbone = ps[1]
+    channels = int(ps[2][1:])
+    batch_size = int(ps[3][2:])
+    optim = ps[4]
+    epoch = int(ps[5])
+    return prefix, backbone, channels, batch_size, optim, epoch
+
+
+def load_model(model, version=2):
+    num_kps = cfg.NUM_LANDMARK
+    num_limb = len(cfg.PAF_LANDMARK_PAIR)
+    if version == 2:
+        prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
+        net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
+        creator, featname, fixed = cfg.BACKBONE[backbone]
+    else:
+        prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
+        net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
+        creator, featname, fixed = cfg.BACKBONE_V3[backbone]
+    net.init_backbone(creator, featname, fixed)
+    net.load_params(model, mx.cpu(0))
+    return net

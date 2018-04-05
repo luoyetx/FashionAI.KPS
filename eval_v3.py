@@ -12,8 +12,8 @@ import pandas as pd
 from dataset import FashionAIKPSDataSet
 from model import load_model
 from config import cfg
-from utils import draw_heatmap, draw_paf, draw_kps
-from utils import process_cv_img, detect_kps, get_logger, mkdir
+from utils import draw_heatmap, draw_kps
+from utils import process_cv_img, detect_kps_v3, get_logger, mkdir
 
 
 def calc_error(kps_pred, kps_gt, category):
@@ -38,7 +38,7 @@ def main():
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--save', action='store_true')
-    parser.add_argument('--version', type=int, default=2)
+    parser.add_argument('--version', type=int, default=3)
     parser.add_argument('--use-cache', action='store_true')
     args = parser.parse_args()
     print(args)
@@ -70,23 +70,9 @@ def main():
         img = cv2.imread(path)
         category = testdata.category[i]
         kps_gt = testdata.kps[i]
-        # predict
-        if use_cache:
-            fn = os.path.basename(testdata.img_lst[i]).split('.')[0] + '.npy'
-            cache_path = os.path.join('./result/val/%s'%category, fn)
-            npy = np.load(cache_path)
-            num_ldm = cfg.NUM_LANDMARK
-            heatmap = npy[:num_ldm+1]
-            paf = npy[num_ldm+1:]
-        else:
-            heatmap, paf = net.predict(img, ctx)
-        # save output
-        if save:
-            out_path = '%s/%s/%s.npy' % (base_name, category, os.path.basename(path).split('.')[0])
-            npy = np.concatenate([heatmap, paf])
-            np.save(out_path, npy)
+        heatmap = net.predict(img, ctx)
         # detect kps
-        kps_pred = detect_kps(img, heatmap, paf, category)
+        kps_pred = detect_kps_v3(img, heatmap, None, category)
         # calc_error
         error = calc_error(kps_pred, kps_gt, category)
         record.append((path, kps_gt, kps_pred, error))
@@ -105,20 +91,15 @@ def main():
 
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
-            htall = heatmap[-1]
-            heatmap = heatmap[::-1].max(axis=0)
+            heatmap = heatmap[landmark_idx].max(axis=0)
 
             dr1 = draw_heatmap(img, heatmap)
-            dr2 = draw_paf(img, paf)
-            dr3 = draw_kps(img, kps_pred)
-            dr4 = draw_heatmap(img, htall)
-            dr5 = draw_kps(img, kps_gt)
+            dr2 = draw_kps(img, kps_pred)
+            dr3 = draw_kps(img, kps_gt)
 
             cv2.imshow('heatmap', dr1)
-            cv2.imshow('paf', dr2)
-            cv2.imshow('detect', dr3)
-            cv2.imshow('htall', dr4)
-            cv2.imshow('kps_gt', dr5)
+            cv2.imshow('kps_pred', dr2)
+            cv2.imshow('kps_gt', dr3)
             key = cv2.waitKey(0)
             if key == 27:
                 break

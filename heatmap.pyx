@@ -5,12 +5,13 @@ cimport numpy as np
 ctypedef np.float_t DTYPE_t
 
 @cython.boundscheck(False)
-def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] entry, DTYPE_t rows,
-                    DTYPE_t cols, DTYPE_t center_x, DTYPE_t center_y,  DTYPE_t stride,
-                    int grid_x, int grid_y, DTYPE_t sigma):
+def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] entry, DTYPE_t center_x, DTYPE_t center_y,
+                    DTYPE_t stride, DTYPE_t sigma):
+    cdef int grid_y = entry.shape[0]
+    cdef int grid_x = entry.shape[1]
+
     cdef DTYPE_t start = stride / 2.0 - 0.5
     cdef DTYPE_t x, y, d2
-    cdef int g_y, g_x
     cdef DTYPE_t exponent
 
     for g_y in range(grid_y):
@@ -30,7 +31,9 @@ def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] entry, DTYPE_t rows,
 @cython.boundscheck(False)
 def putVecMaps(np.ndarray[DTYPE_t, ndim = 2] entryX, np.ndarray[DTYPE_t, ndim = 2]  entryY,
                DTYPE_t center1_x, DTYPE_t center1_y, DTYPE_t center2_x, DTYPE_t center2_y,
-               int stride, int grid_x, int grid_y, DTYPE_t thres):
+               int stride, DTYPE_t thres):
+    cdef int grid_y = entryX.shape[0]
+    cdef int grid_x = entryX.shape[1]
 
     cdef DTYPE_t centerA_x = center1_x / stride
     cdef DTYPE_t centerA_y = center1_y / stride

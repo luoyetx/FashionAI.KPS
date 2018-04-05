@@ -1,7 +1,6 @@
 from __future__ import print_function, division
 
 import os
-import argparse
 import cv2
 import mxnet as mx
 from mxnet import gluon as gl
@@ -9,8 +8,7 @@ import pandas as pd
 import numpy as np
 
 from config import cfg
-from utils import process_cv_img, reverse_to_cv_img, crop_patch
-from utils import draw_heatmap, draw_kps, draw_paf
+from utils import process_cv_img, reverse_to_cv_img, crop_patch, draw_heatmap, draw_kps, draw_paf
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
@@ -78,43 +76,12 @@ def transform(img, kps, is_train=True):
     return img, kps
 
 
-def get_label_v2(height, width, category, kps):
-    stride = 8
-    sigma = 7
-    grid_x = width // stride
-    grid_y = height // stride
-    # heatmap and mask
-    landmark_idx = cfg.LANDMARK_IDX[category]
-    num_kps = len(kps)
-    heatmap = np.zeros((num_kps + 1, grid_y, grid_x))
-    heatmap_mask = np.zeros_like(heatmap)
-    for i, (x, y, v) in enumerate(kps):
-        if i in landmark_idx:
-            heatmap_mask[i] = 1
-        if v != -1:
-            putGaussianMaps(heatmap[i], x, y, stride, sigma)
-    heatmap[-1] = heatmap[::-1].max(axis=0)
-    heatmap_mask[-1] = heatmap_mask[::-1].max(axis=0)
-    # paf
-    limb = cfg.PAF_LANDMARK_PAIR
-    num_limb = len(limb)
-    paf = np.zeros((2 * num_limb, grid_y, grid_x))
-    paf_mask = np.zeros_like(paf)
-    for idx, (idx1, idx2) in enumerate(limb):
-        x1, y1, v1 = kps[idx1]
-        x2, y2, v2 = kps[idx2]
-        if v1 != -1 and v2 != -1:
-            putVecMaps(paf[2*idx], paf[2*idx + 1], x1, y1, x2, y2, stride, cfg.HEATMAP_THRES)
-            paf_mask[2*idx] = 1
-            paf_mask[2*idx + 1] = 1
-    # result
-    return heatmap.astype('float32'), paf.astype('float32'), heatmap_mask.astype('float32'), paf_mask.astype('float32')
-
-
-def get_label_v3(height, width, category, kps):
+def get_label(img, category, kps):
     strides = [4, 8, 16]
     sigmas = [7, 7, 7]
-    heatmaps, masks = [], []
+    height, width = img.shape[:2]
+    heatmaps = []
+    masks = []
     for stride, sigma in zip(strides, sigmas):
         # heatmap and mask
         landmark_idx = cfg.LANDMARK_IDX[category]
@@ -127,18 +94,17 @@ def get_label_v3(height, width, category, kps):
                 mask[i] = 1
             if v != -1:
                 putGaussianMaps(heatmap[i], x, y, stride, sigma)
-        heatmaps.append(heatmap.astype('float32'))
-        masks.append(mask.astype('float32'))
+        heatmaps.append(heatmap)
+        masks.append(mask)
     # result
     return heatmaps, masks
 
 
 class FashionAIKPSDataSet(gl.data.Dataset):
 
-    def __init__(self, df, version=2, is_train=True):
+    def __init__(self, df, is_train=True):
         self.img_dir = os.path.join(cfg.DATA_DIR, 'train')
         self.is_train = is_train
-        self.version = version
         # img path
         self.img_lst = df['image_id'].tolist()
         self.category = df['image_category'].tolist()
@@ -159,60 +125,38 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         kps = self.kps[idx].copy()
         # transform
         img, kps = transform(img, kps, self.is_train)
+        ht, mask = get_label(img, category, kps)
         # preprocess
-        height, width = img.shape[:2]
         img = process_cv_img(img)
+        ht = [x.astype('float32') for x in ht]
+        mask = [x.astype('float32') for x in mask]
         self.cur_kps = kps  # for debug and show
-        # get label
-        if self.version == 2:
-            heatmap, paf, mask_heatmap, mask_paf = get_label_v2(height, width, category, kps)
-            return img, heatmap, paf, mask_heatmap, mask_paf
-        else:
-            ht, mask = get_label_v3(height, width, category, kps)
-            return img, ht[0], mask[0], ht[1], mask[1], ht[2], mask[2]
+        return img, ht[0], mask[0], ht[1], mask[1], ht[2], mask[2]
 
     def __len__(self):
         return len(self.img_lst)
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--version', type=int, default=2)
-    args = parser.parse_args()
-    print(args)
-    version = args.version
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
-    dataset = FashionAIKPSDataSet(df, version=version)
-    print('DataSet Size', len(dataset))
-    for idx, pack in enumerate(dataset):
-        if version == 2:
-            data, heatmap, paf, mask_heatmap, mask_paf = pack
-            heatmap = heatmap[::-1].max(axis=0)
-        else:
-            data, ht4, mask4, ht8, mask8, ht16, mask16 = pack
-
+    dataset = FashionAIKPSDataSet(df)
+    print(len(dataset))
+    for idx, (data, ht4, mask4, ht8, mask8, ht16, mask16) in enumerate(dataset):
+        #data, heatmap, paf, mask_heatmap, mask_paf = dataset[10]
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
         category = dataset.category[idx]
 
-        if version == 2:
-            dr1 = draw_heatmap(img, heatmap)
-            dr2 = draw_paf(img, paf)
-            dr3 = draw_kps(img, kps)
-            cv2.imshow("heatmap", dr1)
-            cv2.imshow("paf", dr2)
-            cv2.imshow("kps", dr3)
-        else:
-            dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
-            dr2 = draw_heatmap(img, ht8.max(axis=0), True)
-            dr3 = draw_heatmap(img, ht16.max(axis=0), True)
-            dr4 = draw_kps(img, kps)
-            cv2.imshow('h4', dr1)
-            cv2.imshow('h8', dr2)
-            cv2.imshow('h16', dr3)
-            cv2.imshow('kps', dr4)
+        dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
+        dr2 = draw_heatmap(img, ht8.max(axis=0), True)
+        dr3 = draw_heatmap(img, ht16.max(axis=0), True)
+        dr4 = draw_kps(img, kps)
 
+        cv2.imshow('h4', dr1)
+        cv2.imshow('h8', dr2)
+        cv2.imshow('h16', dr3)
+        cv2.imshow('kps', dr4)
         key = cv2.waitKey(0)
         if key == 27:
             break
