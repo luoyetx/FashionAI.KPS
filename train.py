@@ -12,7 +12,7 @@ from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 import numpy as np
 import pandas as pd
-from mxboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, load_model
@@ -124,7 +124,7 @@ def main():
     parser.add_argument('--cpm-stages', type=int, default=5)
     parser.add_argument('--cpm-channels', type=int, default=64)
     parser.add_argument('--seed', type=int, default=666)
-    parser.add_argument('--steps', type=str, default='30,60')
+    parser.add_argument('--steps', type=str, default='1000')
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--start-epoch', type=int, default=1)
     parser.add_argument('--model-path', type=str, default='')
@@ -190,8 +190,6 @@ def main():
     if os.path.exists(log_dir) and start_epoch == 1:
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)
-    net(mx.nd.zeros(shape=(1, 3, 368, 368), ctx=ctx[0]))
-    sw.add_graph(net)
     rds = []
     for i in range(cpm_stages):
         rd1 = Recorder('h-%d' % i, freq)

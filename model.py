@@ -21,9 +21,9 @@ def freeze_bn(block):
             freeze_bn(child)
 
 
-def install_backbone(net, creator, featnames, fixed):
+def install_backbone(net, creator, featnames, fixed, pretrained):
     with net.name_scope():
-        backbone = creator(pretrained=True)
+        backbone = creator(pretrained=pretrained)
         name = backbone.name
         # hacking parameters
         params = backbone.collect_params()
@@ -47,8 +47,8 @@ def install_backbone(net, creator, featnames, fixed):
 
 class CPMBlock(gl.HybridBlock):
 
-    def __init__(self, num_output, channels, ks=[3, 3, 3, 1, 1], **kwargs):
-        super(CPMBlock, self).__init__(**kwargs)
+    def __init__(self, num_output, channels, ks=[3, 3, 3, 1, 1]):
+        super(CPMBlock, self).__init__()
         with self.name_scope():
             self.net = nn.HybridSequential()
             for k in ks[:-1]:
@@ -64,8 +64,8 @@ class CPMBlock(gl.HybridBlock):
 
 class PoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, stages, channels, **kwargs):
-        super(PoseNet, self).__init__(**kwargs)
+    def __init__(self, num_kps, num_limb, stages, channels):
+        super(PoseNet, self).__init__()
         with self.name_scope():
             # backbone
             self.backbone = None
@@ -97,8 +97,8 @@ class PoseNet(gl.HybridBlock):
             out = F.concat(feat, out1, out2)
         return outs
 
-    def init_backbone(self, creator, featname, fixed):
-        install_backbone(self, creator, [featname], fixed)
+    def init_backbone(self, creator, featname, fixed, pretrained=True):
+        install_backbone(self, creator, [featname], fixed, pretrained)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -212,9 +212,9 @@ class CascadePoseNet(gl.HybridBlock):
         refine_pred = self.refine_net(*global_pred)
         return global_pred, refine_pred
 
-    def init_backbone(self, creator, featnames, fixed):
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
         assert len(featnames) == 3
-        install_backbone(self, creator, featnames, fixed)
+        install_backbone(self, creator, featnames, fixed, pretrained)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -278,6 +278,6 @@ def load_model(model, version=2):
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    net.init_backbone(creator, featname, fixed)
+    net.init_backbone(creator, featname, fixed, pretrained=False)
     net.load_params(model, mx.cpu(0))
     return net
