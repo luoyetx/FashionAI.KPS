@@ -15,7 +15,7 @@ from utils import draw_heatmap, draw_paf, draw_kps
 from utils import detect_kps_v1, detect_kps_v3, get_logger
 
 
-file_pattern = './result/tmp_result_%d'
+file_pattern = './result/tmp_result_%d.csv'
 
 
 def work_func(df, idx, args):
@@ -32,7 +32,6 @@ def work_func(df, idx, args):
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     # data
-    df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
     image_ids = df['image_id'].tolist()
     image_paths = [os.path.join(data_dir, 'test', img_id) for img_id in image_ids]
     image_categories = df['image_category'].tolist()
@@ -72,7 +71,7 @@ def work_func(df, idx, args):
             if key == 27:
                 break
         if i % 100 == 0:
-            logger.info('Worker %d process %d samples' % (idx, i + 1))
+            logger.info('Worker %d process %d samples', idx, i + 1)
     # save
     fn = file_pattern % idx
     with open(fn, 'w') as fout:
