@@ -5,31 +5,31 @@ cimport numpy as np
 ctypedef np.float_t DTYPE_t
 
 @cython.boundscheck(False)
-def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] entry, DTYPE_t center_x, DTYPE_t center_y,
-                    DTYPE_t stride, DTYPE_t sigma):
-    cdef int grid_y = entry.shape[0]
-    cdef int grid_x = entry.shape[1]
+def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] heatMap, np.ndarray[DTYPE_t, ndim = 2] mask,
+                    DTYPE_t center_x, DTYPE_t center_y, int visible,
+                    int stride, DTYPE_t sigma):
+    cdef int height = heatMap.shape[0]
+    cdef int width = heatMap.shape[1]
 
     cdef DTYPE_t start = stride / 2.0 - 0.5
     cdef DTYPE_t x, y, d2
     cdef DTYPE_t exponent
+    cdef int g_y, g_x
 
-    for g_y in range(grid_y):
-        for g_x in range(grid_x):
+    for g_y in range(height):
+        for g_x in range(width):
             x = start + g_x * stride
             y = start + g_y * stride
             d2 = (x - center_x) * (x - center_x) + (y - center_y) * (y - center_y)
             exponent = d2 / 2.0 / sigma / sigma
             if exponent > 4.6052:
                 continue
-            entry[g_y, g_x] += np.exp(-exponent)
-            if entry[g_y, g_x] > 1:
-                entry[g_y, g_x] = 1
-    return entry
+            heatMap[g_y, g_x] += np.exp(-exponent)
+            #mask[g_y, g_x] = visible
 
 
 @cython.boundscheck(False)
-def putVecMaps(np.ndarray[DTYPE_t, ndim = 2] entryX, np.ndarray[DTYPE_t, ndim = 2]  entryY,
+def putVecMaps(np.ndarray[DTYPE_t, ndim = 2] entryX, np.ndarray[DTYPE_t, ndim = 2] entryY,
                DTYPE_t center1_x, DTYPE_t center1_y, DTYPE_t center2_x, DTYPE_t center2_y,
                int stride, DTYPE_t thres):
     cdef int grid_y = entryX.shape[0]

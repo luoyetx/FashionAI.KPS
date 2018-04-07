@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import os
+import cv2
 import numpy as np
 import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
@@ -21,7 +22,7 @@ def freeze_bn(block):
             freeze_bn(child)
 
 
-def install_backbone(net, creator, featnames, fixed, pretrained):
+def install_backbone(net, creator, featnames, fixed, pretrained, fixbn):
     with net.name_scope():
         backbone = creator(pretrained=pretrained)
         name = backbone.name
@@ -36,7 +37,8 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
                 print('fix parameter', key)
                 item.grad_req = 'null'
         # special for batchnorm
-        freeze_bn(backbone.features)
+        if fixbn:
+            freeze_bn(backbone.features)
         # create symbol
         data = mx.sym.var('data')
         out_names = ['_'.join([backbone.name, featname, 'output']) for featname in featnames]
@@ -97,8 +99,8 @@ class PoseNet(gl.HybridBlock):
             out = F.concat(feat, out1, out2)
         return outs
 
-    def init_backbone(self, creator, featname, fixed, pretrained=True):
-        install_backbone(self, creator, [featname], fixed, pretrained)
+    def init_backbone(self, creator, featname, fixed, pretrained=True, fixbn=True):
+        install_backbone(self, creator, [featname], fixed, pretrained, fixbn)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -109,32 +111,62 @@ class PoseNet(gl.HybridBlock):
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
         out = self(batch)
-        heatmap = out[-1][0][0].asnumpy()
-        paf = out[-1][1][0].asnumpy()
+        heatmap = out[-1][0][0].asnumpy().astype('float64')
+        paf = out[-1][1][0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = out[-1][0][1].asnumpy()
+            # heatmap
+            heatmap_flip = out[-1][0][1].asnumpy().astype('float64')
             heatmap_flip = heatmap_flip[:, :, ::-1]
             for i, j in cfg.LANDMARK_SWAP:
                 tmp = heatmap_flip[i].copy()
                 heatmap_flip[i] = heatmap_flip[j]
                 heatmap_flip[j] = tmp
             heatmap = (heatmap + heatmap_flip) / 2
+            # paf
+            paf_flip = out[-1][1][1].asnumpy().astype('float64')
+            paf_flip = paf_flip[:, :, ::-1]
+
+            def get_flip_idx(p):
+                for px, py in cfg.LANDMARK_SWAP:
+                    if px == p:
+                        return py
+                    if py == p:
+                        return px
+                return p
+
+            num = len(cfg.PAF_LANDMARK_PAIR)
+            for i in range(num):
+                p1, p2 = cfg.PAF_LANDMARK_PAIR[i]
+                p1, p2 = get_flip_idx(p1), get_flip_idx(p2)
+                for j in range(i, num):
+                    p3, p4 = cfg.PAF_LANDMARK_PAIR[j]
+                    if p1 == p3 and p2 == p4:
+                        tmp = paf_flip[2*i: 2*i+2].copy()
+                        paf_flip[2*i: 2*i+2] = paf_flip[2*j: 2*j+2]
+                        paf_flip[2*j: 2*j+2] = tmp
+                        paf_flip[2*i] *= -1  # flip x
+                        paf_flip[2*j] *= -1
+                    elif p1 == p4 and p2 == p3:
+                        assert i == j
+                        paf_flip[2*i+1] *= -1  # flip y
+            paf = (paf + paf_flip) / 2
+
         return heatmap, paf
 
 
 
 class CPNGlobalBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_channel=64):
+    def __init__(self, num_output, num_channel=64):
         super(CPNGlobalBlock, self).__init__()
-        self.num_kps = num_kps
+        self.num_output = num_output
         self.num_channel = num_channel
         with self.name_scope():
             self.P4 = self.block()   # 1/4
             self.P8 = self.block()   # 1/8
             self.P16 = self.block()  # 1/16
-            self.T8 = nn.Conv2D(self.num_kps, 3, 1, 1)  # 1/16 -> 1/8
-            self.T4 = nn.Conv2D(self.num_kps, 3, 1, 1)  # 1/8 -> 1/4
+            self.T8 = nn.Conv2D(self.num_output, 1, 1, 0)  # 1/16 -> 1/8
+            self.T4 = nn.Conv2D(self.num_output, 1, 1, 0)  # 1/8 -> 1/4
 
     def hybrid_forward(self, F, x4, x8, x16):
         F4, F8, F16 = x4, x8, x16
@@ -156,28 +188,29 @@ class CPNGlobalBlock(gl.HybridBlock):
         net = nn.HybridSequential()
         with net.name_scope():
             net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
-            net.add(nn.Conv2D(self.num_kps, 3, 1, 1))
+            net.add(nn.Conv2D(self.num_output, 3, 1, 1))
         return net
 
 
 class CPNRefineBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_channel):
+    def __init__(self, num_output, num_channel):
         super(CPNRefineBlock, self).__init__()
-        self.num_kps = num_kps
+        self.num_output = num_output
         self.num_channel = num_channel
         with self.name_scope():
             self.P16 = nn.HybridSequential()
-            self.P16.add(self.bottleneck(), self.bottleneck(), self.bottleneck())
+            self.P16.add(self.bottleneck(), self.bottleneck())
             self.P8 = nn.HybridSequential()
-            self.P8.add(self.bottleneck(), self.bottleneck())
-            self.P4 = nn.HybridSequential()
-            self.P4.add(self.bottleneck())
-            self.R = nn.Conv2D(self.num_kps, 3, 1, 1)
+            self.P8.add(self.bottleneck())
+            # self.P4 = nn.HybridSequential()
+            # self.P4.add(self.bottleneck(), self.bottleneck(), self.bottleneck())
+            self.R = nn.HybridSequential()
+            self.R.add(self.bottleneck(), nn.Conv2D(self.num_output, 3, 1, 1))
 
     def hybrid_forward(self, F, x4, x8, x16):
         F4, F8, F16 = x4, x8, x16
-        F4 = self.P4(F4)
+        # F4 = self.P4(F4)
         F8 = self.P8(F8)
         F16 = self.P16(F16)
         U16 = F.UpSampling(F16, scale=4, sample_type='nearest')
@@ -190,8 +223,9 @@ class CPNRefineBlock(gl.HybridBlock):
     def bottleneck(self):
         net = nn.HybridSequential()
         with net.name_scope():
-            net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
-            net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
+            net.add(nn.Conv2D(self.num_channel // 2, 1, 1, 0, activation='relu'))
+            net.add(nn.Conv2D(self.num_channel // 2, 3, 1, 1, activation='relu'))
+            net.add(nn.Conv2D(self.num_channel, 1, 1, 0, activation='relu'))
         return net
 
 
@@ -203,8 +237,8 @@ class CascadePoseNet(gl.HybridBlock):
         self.num_channel = num_channel
         with self.name_scope():
             self.backbone = None
-            self.global_net = CPNGlobalBlock(self.num_kps, self.num_channel)
-            self.refine_net = CPNRefineBlock(self.num_kps, self.num_channel)
+            self.global_net = CPNGlobalBlock(self.num_kps + 1, self.num_channel)
+            self.refine_net = CPNRefineBlock(self.num_kps + 1, self.num_channel)
 
     def hybrid_forward(self, F, x):
         feats = self.backbone(x)  # pylint: disable=not-callable
@@ -212,9 +246,9 @@ class CascadePoseNet(gl.HybridBlock):
         refine_pred = self.refine_net(*global_pred)
         return global_pred, refine_pred
 
-    def init_backbone(self, creator, featnames, fixed, pretrained=True):
+    def init_backbone(self, creator, featnames, fixed, pretrained=True, fixbn=True):
         assert len(featnames) == 3
-        install_backbone(self, creator, featnames, fixed, pretrained)
+        install_backbone(self, creator, featnames, fixed, pretrained, fixbn)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -225,9 +259,9 @@ class CascadePoseNet(gl.HybridBlock):
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
         global_pred, refine_pred = self(batch)
-        heatmap = refine_pred[0].asnumpy()
+        heatmap = refine_pred[0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = refine_pred[1].asnumpy()
+            heatmap_flip = refine_pred[1].asnumpy().astype('float64')
             heatmap_flip = heatmap_flip[:, :, ::-1]
             for i, j in cfg.LANDMARK_SWAP:
                 tmp = heatmap_flip[i].copy()
@@ -278,6 +312,38 @@ def load_model(model, version=2):
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    net.init_backbone(creator, featname, fixed, pretrained=False)
+    net.init_backbone(creator, featname, fixed, pretrained=False, fixbn=False)
     net.load_params(model, mx.cpu(0))
     return net
+
+
+def multi_scale_predict(net, ctx, version, img, multi_scale=False):
+    if not multi_scale:
+        return net.predict(img, ctx)
+    scales = [512, 440, 386]
+    h, w = img.shape[:2]
+    if version == 2:
+        heatmap = 0
+        paf = 0
+    else:
+        heatmap = 0
+    for scale in scales:
+        factor = scale / max(h, w)
+        img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
+        if version == 2:
+            heatmap_, paf_ = net.predict(img_, ctx)
+            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            heatmap = heatmap + heatmap_
+            paf = paf + paf_
+        else:
+            heatmap_ = net.predict(img, ctx)
+            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            heatmap = heatmap + heatmap_
+    if version == 2:
+        heatmap /= len(scales)
+        paf /= len(scales)
+        return heatmap, paf
+    else:
+        heatmap /= len(scales)
+        return heatmap

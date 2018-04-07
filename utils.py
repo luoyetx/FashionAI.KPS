@@ -115,8 +115,8 @@ def mkdir(path):
 
 def detect_kps_v1(img, heatmap, paf, category):
     h, w = img.shape[:2]
-    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
-    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h))
+    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
+    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = len(landmark_idx)
     sigma = 1
@@ -127,7 +127,7 @@ def detect_kps_v1(img, heatmap, paf, category):
     peaks = []
     heatmap = heatmap[:, :, landmark_idx]
     for i in range(num_ldm):
-        ht_ori = heatmap[:, :, i].astype('float64')
+        ht_ori = heatmap[:, :, i]
         ht = gaussian_filter(ht_ori, sigma=sigma)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)
@@ -219,8 +219,8 @@ def detect_kps_v1(img, heatmap, paf, category):
 
 def detect_kps_v2(img, heatmap, paf, category):
     h, w = img.shape[:2]
-    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
-    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h))
+    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
+    paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = cfg.NUM_LANDMARK
     sigma = 1
@@ -230,7 +230,7 @@ def detect_kps_v2(img, heatmap, paf, category):
     # peaks
     peaks = []
     for i in range(num_ldm):
-        ht_ori = heatmap[:, :, i].astype('float64')
+        ht_ori = heatmap[:, :, i]
         ht = gaussian_filter(ht_ori, sigma=sigma)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)
@@ -320,7 +320,7 @@ def detect_kps_v2(img, heatmap, paf, category):
 
 def detect_kps_v3(img, heatmap, category):
     h, w = img.shape[:2]
-    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h))
+    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = cfg.NUM_LANDMARK
     sigma = 1
@@ -329,7 +329,7 @@ def detect_kps_v3(img, heatmap, category):
     kps = np.zeros((num_ldm, 3))
     kps[:] = -1
     for idx in landmark_idx:
-        ht_ori = heatmap[:, :, idx].astype('float64')
+        ht_ori = heatmap[:, :, idx]
         ht = gaussian_filter(ht_ori, sigma=sigma)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)

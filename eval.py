@@ -9,9 +9,9 @@ import mxnet as mx
 import numpy as np
 import pandas as pd
 
-from dataset import FashionAIKPSDataSet
-from model import load_model
 from config import cfg
+from dataset import FashionAIKPSDataSet
+from model import load_model, multi_scale_predict
 from utils import draw_heatmap, draw_paf, draw_kps
 from utils import process_cv_img, detect_kps_v1, detect_kps_v3, get_logger
 
@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--version', type=int, default=2)
+    parser.add_argument('--multi-scale', action='store_true')
     args = parser.parse_args()
     print(args)
     # hyper parameters
@@ -45,6 +46,7 @@ def main():
     data_dir = cfg.DATA_DIR
     show = args.show
     version = args.version
+    multi_scale = args.multi_scale
     logger = get_logger()
     # model
     net = load_model(args.model, version)
@@ -64,10 +66,10 @@ def main():
         kps_gt = testdata.kps[i]
         # predict
         if version == 2:
-            heatmap, paf = net.predict(img, ctx)
+            heatmap, paf = multi_scale_predict(net, ctx, version, img, multi_scale)
             kps_pred = detect_kps_v1(img, heatmap, paf, category)
         else:
-            heatmap = net.predict(img, ctx)
+            heatmap = multi_scale_predict(net, ctx, version, img, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
         # calc_error
         error = calc_error(kps_pred, kps_gt, category)
@@ -115,7 +117,7 @@ def main():
     logger.info('Total Eval %d samples', num)
     sum_err, sum_num = 0, 0
     for k in result:
-        if len(result[k]) != 0:
+        if result[k]:
             err = np.array(result[k])
             logger.info('Total Average Error for %s: %f', k, err.mean())
             sum_err += err.sum()

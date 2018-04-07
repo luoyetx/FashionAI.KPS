@@ -129,6 +129,7 @@ def main():
     parser.add_argument('--start-epoch', type=int, default=1)
     parser.add_argument('--model-path', type=str, default='')
     parser.add_argument('--prefix', type=str, default='default', help='model description')
+    parser.add_argument('--fixbn', action='store_true')
     args = parser.parse_args()
     print(args)
     # seed
@@ -148,6 +149,7 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
+    fixbn = args.fixbn
     start_epoch = args.start_epoch
     prefix = args.prefix
     model_path = None if args.model_path == '' else args.model_path
@@ -167,7 +169,7 @@ def main():
         num_limb = len(cfg.PAF_LANDMARK_PAIR)
         net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-        net.init_backbone(creator, featname, fixed)
+        net.init_backbone(creator, featname, fixed, pretrained=True, fixbn=fixbn)
         net.initialize(mx.init.Normal(), ctx=ctx)
         net.collect_params().reset_ctx(ctx)
     else:
@@ -201,7 +203,7 @@ def main():
         global_step = 0
     else:
         meta_path = './output/%s-%04d.meta' % (base_name, start_epoch - 1)
-        logger.info('Load meta from %s'%meta_path)
+        logger.info('Load meta from %s', meta_path)
         global_step = pickle.load(open(meta_path, 'rb'))
     # update ctx
     ctx = ctx * iter_size

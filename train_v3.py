@@ -119,11 +119,12 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--wd', type=float, default=1e-5)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
-    parser.add_argument('--num-channel', type=int, default=64)
+    parser.add_argument('--num-channel', type=int, default=128)
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--prefix', type=str, default='default', help='model description')
+    parser.add_argument('--fixbn', action='store_true')
     args = parser.parse_args()
     print(args)
     # seed
@@ -142,6 +143,7 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
+    fixbn = args.fixbn
     prefix = args.prefix
     base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     logger = get_logger()
@@ -157,7 +159,7 @@ def main():
     num_kps = cfg.NUM_LANDMARK
     net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
     creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    net.init_backbone(creator, featname, fixed)
+    net.init_backbone(creator, featname, fixed, pretrained=True, fixbn=fixbn)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
     criterion = SumL2Loss()
