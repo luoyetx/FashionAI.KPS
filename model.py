@@ -47,6 +47,8 @@ def install_backbone(net, creator, featnames, fixed, pretrained, fixbn):
         net.backbone = gl.SymbolBlock(outs, data, params=backbone.collect_params())
 
 
+##### model for version 2
+
 class CPMBlock(gl.HybridBlock):
 
     def __init__(self, num_output, channels, ks=[3, 3, 3, 1, 1]):
@@ -154,6 +156,7 @@ class PoseNet(gl.HybridBlock):
         return heatmap, paf
 
 
+##### model for version 3
 
 class CPNGlobalBlock(gl.HybridBlock):
 
@@ -270,6 +273,52 @@ class CascadePoseNet(gl.HybridBlock):
             heatmap = (heatmap + heatmap_flip) / 2
         return heatmap
 
+
+##### model for version 4
+
+class MaskHeatHead(gl.HybridBlock):
+
+    def __init__(self, num_output, num_channel=128):
+        super(MaskHeatHead, self).__init__()
+        with self.name_scope():
+            self.feat_trans = nn.HybridSequential()
+            ks = [7, 7, 7, 7, 7, 1, 1]
+            for k in ks:
+                self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
+            self.mask_pred = nn.HybridSequential()
+            self.mask_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(5, 3, 1, 1))
+            self.heat_pred = nn.HybridSequential()
+            self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_output, 3, 1, 1))
+
+
+    def hybrid_forward(self, F, x):
+        feat = self.feat_trans(x)
+        mask = F.sigmoid(self.mask_pred(feat))
+        feat = F.broadcast_mul(feat, F.max(mask, axis=1, keepdims=True))
+        heatmap = self.heat_pred(feat)
+        return feat, mask, heatmap
+
+
+class MaskPoseNet(gl.HybridBlock):
+
+    def __init__(self, num_kps, num_channel):
+        super(MaskPoseNet, self).__init__()
+        with self.name_scope():
+            self.backbone = None
+            self.head = MaskHeatHead(num_kps + 1, num_channel)
+
+    def hybrid_forward(self, F, x):
+        feat = self.backbone(x)  # pylint: disable=not-callable
+        feat, mask, heatmap = self.head(feat)
+        return mask, heatmap
+
+    def init_backbone(self, creator, featname, fixed, pretrained=True, fixbn=True):
+        install_backbone(self, creator, [featname], fixed, pretrained, fixbn)
 
 
 def parse_from_name_v2(name):

@@ -17,17 +17,6 @@ pyximport.install(setup_args={'include_dirs': np.get_include()})
 from heatmap import putGaussianMaps, putVecMaps
 
 
-def get_center(kps):
-    keep = kps[:, 2] != -1
-    xmin = kps[keep, 0].min()
-    xmax = kps[keep, 0].max()
-    ymin = kps[keep, 1].min()
-    ymax = kps[keep, 1].max()
-    xc = (xmin + xmax) / 2
-    yc = (ymin + ymax) / 2
-    return (xc, yc)
-
-
 def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
     # flip
@@ -41,7 +30,7 @@ def transform(img, kps, is_train=True):
     # rotate
     if is_train:
         angle = (np.random.random() - 0.5) * 2 * cfg.ROT_MAX
-        center = get_center(kps)
+        center = (width // 2, height // 2)
         rot = cv2.getRotationMatrix2D(center, angle, 1)
         cos, sin = abs(rot[0, 0]), abs(rot[0, 1])
         dsize = (int(height * sin + width * cos), int(height * cos + width * sin))
@@ -62,7 +51,7 @@ def transform(img, kps, is_train=True):
     # crop
     rand_x = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
     rand_y = (np.random.rand() - 0.5) * 2 * cfg.CROP_CENTER_OFFSET_MAX if is_train else 0
-    center = get_center(kps)
+    center = (width // 2, height // 2)
     center = (center[0] + rand_x, center[1] + rand_y)
     x1 = int(center[0] - cfg.CROP_SIZE / 2)
     y1 = int(center[1] - cfg.CROP_SIZE / 2)
@@ -76,18 +65,6 @@ def transform(img, kps, is_train=True):
     # fill missing
     kps[kps[:, 2] == -1, :2] = -1
     return img, kps
-
-
-def get_obj_mask(shape, kps):
-    w, h = shape
-    mask = np.zeros((h, w))
-    keep = kps[:, -1] != -1
-    xmin = max(min(kps[keep, 0].min(), w), 0)
-    xmax = max(min(kps[keep, 0].max(), w), 0)
-    ymin = max(min(kps[keep, 1].min(), h), 0)
-    ymax = max(min(kps[keep, 1].max(), h), 0)
-    mask[ymin:ymax, xmin:xmax] = 1
-    return mask
 
 
 def get_label_v2(height, width, category, kps):
@@ -154,6 +131,55 @@ def get_label_v3(height, width, category, kps):
     return heatmaps, masks
 
 
+def get_border(shape, kps, expand=0):
+    h, w = shape
+    keep = kps[:, 2] != -1
+    xmin = kps[keep, 0].min()
+    xmax = kps[keep, 0].max()
+    ymin = kps[keep, 1].min()
+    ymax = kps[keep, 1].max()
+    bh, bw = ymax - ymin, xmax - xmin
+    xmin -= expand * bw
+    xmax += expand * bw
+    ymin -= expand * bh
+    ymax += expand * bh
+    xmin = max(min(int(xmin), w), 0)
+    xmax = max(min(int(xmax), w), 0)
+    ymin = max(min(int(ymin), h), 0)
+    ymax = max(min(int(ymax), h), 0)
+    return (xmin, ymin, xmax, ymax)
+
+
+def get_label_v4(height, width, category, kps):
+    stride = 8
+    sigma = 7
+    # heatmap and mask
+    landmark_idx = cfg.LANDMARK_IDX[category]
+    num_kps = len(kps)
+    h, w = height // stride, width // stride
+    heatmap = np.zeros((num_kps + 1, h, w))
+    heatmap_mask = np.zeros_like(heatmap)
+    for i, (x, y, v) in enumerate(kps):
+        if i in landmark_idx and v != -1:
+            heatmap_mask[i] = 1
+            putGaussianMaps(heatmap[i], heatmap_mask[i], x, y, v, stride, sigma)
+    heatmap[-1] = heatmap[::-1].max(axis=0)
+    heatmap_mask[-1] = 1
+    # obj and mask
+    obj = np.zeros((5, h, w))
+    obj_mask = np.zeros_like(obj)
+    cate_idx = cfg.CATEGORY.index(category)
+    xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0.1)
+    xmin = xmin // stride
+    ymin = ymin // stride
+    xmax = xmax // stride + 1
+    ymax = ymax // stride + 1
+    obj[cate_idx, ymin: ymax, xmin: xmax] = 1
+    obj_mask[cate_idx] = 1
+    # result
+    return heatmap.astype('float32'), heatmap_mask.astype('float32'), obj.astype('float32'), obj_mask.astype('float32')
+
+
 class FashionAIKPSDataSet(gl.data.Dataset):
 
     def __init__(self, df, version=2, is_train=True):
@@ -188,9 +214,12 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         if self.version == 2:
             heatmap, paf, mask_heatmap, mask_paf = get_label_v2(height, width, category, kps)
             return img, heatmap, paf, mask_heatmap, mask_paf
-        else:
+        elif self.version == 3:
             ht, mask = get_label_v3(height, width, category, kps)
             return img, ht[0], mask[0], ht[1], mask[1], ht[2], mask[2]
+        else:
+            heatmap, heatmap_mask, obj, obj_mask = get_label_v4(height, width, category, kps)
+            return img, heatmap, heatmap_mask, obj, obj_mask
 
     def __len__(self):
         return len(self.img_lst)
@@ -210,8 +239,10 @@ def main():
         if version == 2:
             data, heatmap, paf, mask_heatmap, mask_paf = pack
             heatmap = heatmap[::-1].max(axis=0)
-        else:
+        elif version == 3:
             data, ht4, mask4, ht8, mask8, ht16, mask16 = pack
+        else:
+            data, heatmap, heatmap_mask, obj, obj_mask = pack
 
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
@@ -224,7 +255,7 @@ def main():
             cv2.imshow("heatmap", dr1)
             cv2.imshow("paf", dr2)
             cv2.imshow("kps", dr3)
-        else:
+        elif version == 3:
             dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
             dr2 = draw_heatmap(img, ht8.max(axis=0), True)
             dr3 = draw_heatmap(img, ht16.max(axis=0), True)
@@ -233,6 +264,12 @@ def main():
             cv2.imshow('h8', dr2)
             cv2.imshow('h16', dr3)
             cv2.imshow('kps', dr4)
+        else:
+            cate_idx = cfg.CATEGORY.index(category)
+            dr1 = draw_heatmap(img, heatmap.max(axis=0))
+            dr2 = draw_heatmap(img, obj[cate_idx])
+            cv2.imshow('heatmap', dr1)
+            cv2.imshow('obj', dr2)
 
         key = cv2.waitKey(0)
         if key == 27:
