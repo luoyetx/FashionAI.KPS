@@ -18,7 +18,7 @@ from heatmap import putGaussianMaps, putVecMaps
 
 
 def get_center(kps):
-    keep = kps[:, 2] != 0
+    keep = kps[:, 2] != -1
     xmin = kps[keep, 0].min()
     xmax = kps[keep, 0].max()
     ymin = kps[keep, 1].min()
@@ -41,7 +41,7 @@ def transform(img, kps, is_train=True):
     # rotate
     if is_train:
         angle = (np.random.random() - 0.5) * 2 * cfg.ROT_MAX
-        center = (width // 2, height // 2)
+        center = get_center(kps)
         rot = cv2.getRotationMatrix2D(center, angle, 1)
         cos, sin = abs(rot[0, 0]), abs(rot[0, 1])
         dsize = (int(height * sin + width * cos), int(height * cos + width * sin))
