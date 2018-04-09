@@ -22,7 +22,7 @@ def freeze_bn(block):
             freeze_bn(child)
 
 
-def install_backbone(net, creator, featnames, fixed, pretrained, fixbn):
+def install_backbone(net, creator, featnames, fixed, pretrained):
     with net.name_scope():
         backbone = creator(pretrained=pretrained)
         name = backbone.name
@@ -37,8 +37,7 @@ def install_backbone(net, creator, featnames, fixed, pretrained, fixbn):
                 print('fix parameter', key)
                 item.grad_req = 'null'
         # special for batchnorm
-        if fixbn:
-            freeze_bn(backbone.features)
+        freeze_bn(backbone.features)
         # create symbol
         data = mx.sym.var('data')
         out_names = ['_'.join([backbone.name, featname, 'output']) for featname in featnames]
@@ -101,8 +100,8 @@ class PoseNet(gl.HybridBlock):
             out = F.concat(feat, out1, out2)
         return outs
 
-    def init_backbone(self, creator, featname, fixed, pretrained=True, fixbn=True):
-        install_backbone(self, creator, [featname], fixed, pretrained, fixbn)
+    def init_backbone(self, creator, featname, fixed, pretrained=True):
+        install_backbone(self, creator, [featname], fixed, pretrained)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -249,9 +248,9 @@ class CascadePoseNet(gl.HybridBlock):
         refine_pred = self.refine_net(*global_pred)
         return global_pred, refine_pred
 
-    def init_backbone(self, creator, featnames, fixed, pretrained=True, fixbn=True):
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
         assert len(featnames) == 3
-        install_backbone(self, creator, featnames, fixed, pretrained, fixbn)
+        install_backbone(self, creator, featnames, fixed, pretrained)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -294,12 +293,23 @@ class MaskHeatHead(gl.HybridBlock):
             self.heat_pred = nn.HybridSequential()
             self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
                                nn.Conv2D(num_output, 3, 1, 1))
+            self.set_lr_mult(self.feat_trans)
+            self.set_lr_mult(self.mask_pred)
+            self.set_lr_mult(self.heat_pred)
 
+    def set_lr_mult(self, net):
+        for conv in net:
+            conv.weight.lr_mult = 4
+            conv.bias.lr_mult = 8
 
     def hybrid_forward(self, F, x):
         feat = self.feat_trans(x)
-        mask = F.sigmoid(self.mask_pred(feat))
-        feat = F.broadcast_mul(feat, F.max(mask, axis=1, keepdims=True))
+        mask = self.mask_pred(feat)
+        mask_to_feat = F.sigmoid(mask)
+        mask_to_feat = F.max(mask_to_feat, axis=1, keepdims=True)
+        mask_to_feat = F.exp(mask_to_feat)
+        mask_to_feat = F.BlockGrad(mask_to_feat)
+        feat = F.broadcast_mul(feat, mask_to_feat)
         heatmap = self.heat_pred(feat)
         return feat, mask, heatmap
 
@@ -317,8 +327,18 @@ class MaskPoseNet(gl.HybridBlock):
         feat, mask, heatmap = self.head(feat)
         return mask, heatmap
 
-    def init_backbone(self, creator, featname, fixed, pretrained=True, fixbn=True):
-        install_backbone(self, creator, [featname], fixed, pretrained, fixbn)
+    def init_backbone(self, creator, featname, fixed, pretrained=True):
+        install_backbone(self, creator, [featname], fixed, pretrained)
+
+    def predict(self, img, ctx, flip=True):
+        data = process_cv_img(img)
+        data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
+        mask, heatmap = self(batch)
+        mask = nd.sigmoid(mask)
+        heatmap = heatmap[0].asnumpy().astype('float64')
+        mask = mask[0].asnumpy().astype('float64')
+        return mask, heatmap
 
 
 def parse_from_name_v2(name):
@@ -357,11 +377,15 @@ def load_model(model, version=2):
         prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
         net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-    else:
+    elif version == 3:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    net.init_backbone(creator, featname, fixed, pretrained=False, fixbn=False)
+    else:
+        prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
+        net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
+        creator, featname, fixed = cfg.BACKBONE_v4[backbone]
+    net.init_backbone(creator, featname, fixed, pretrained=False)
     net.load_params(model, mx.cpu(0))
     return net
 

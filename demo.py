@@ -48,11 +48,15 @@ def main():
         img = reverse_to_cv_img(data)
         out_heatmap, out_paf = net.predict(img, ctx)
         kps_pred = detect_kps_v1(img, out_heatmap, out_paf, category)
-    else:
+    elif version == 3:
         data, ht = testdata[test_idx][:2]
         img = reverse_to_cv_img(data)
         heatmap = net.predict(img, ctx)
         kps_pred = detect_kps_v3(img, heatmap, category)
+    else:
+        data, ht, _, obj, _ = testdata[test_idx]
+        img = reverse_to_cv_img(data)
+        obj, heatmap = net.predict(img, ctx)
 
     kps_gt = testdata.cur_kps
     # render
@@ -74,7 +78,7 @@ def main():
         cv2.imshow('pred_htall', dr5)
         cv2.imshow('pred_kps', dr6)
         cv2.imshow('ori_kps', dr7)
-    else:
+    elif version == 3:
         dr1 = draw_heatmap(img, ht.max(axis=0))
         dr2 = draw_heatmap(img, heatmap.max(axis=0))
         dr3 = draw_kps(img, kps_pred)
@@ -83,6 +87,21 @@ def main():
         cv2.imshow('pred_heatmap', dr2)
         cv2.imshow('pred_kps', dr3)
         cv2.imshow('ori_kps', dr4)
+    else:
+        cate_idx = cfg.CATEGORY.index(category)
+        dr1 = draw_heatmap(img, ht.max(axis=0))
+        dr2 = draw_heatmap(img, heatmap.max(axis=0))
+        dr3 = draw_heatmap(img, obj.max(axis=0))
+        dr4 = draw_heatmap(img, obj[cate_idx])
+        cv2.imshow('ori_heatmap', dr1)
+        cv2.imshow('pred_heatmap', dr2)
+        cv2.imshow('full mask', dr3)
+        cv2.imshow('cate mask', dr4)
+        cv2.imshow('0', draw_heatmap(img, obj[0]))
+        cv2.imshow('1', draw_heatmap(img, obj[1]))
+        cv2.imshow('2', draw_heatmap(img, obj[2]))
+        cv2.imshow('3', draw_heatmap(img, obj[3]))
+        cv2.imshow('4', draw_heatmap(img, obj[4]))
     cv2.waitKey(0)
 
 

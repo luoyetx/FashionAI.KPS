@@ -14,48 +14,10 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
+from config import cfg
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, CascadePoseNet
-from config import cfg
-from utils import get_logger
-
-
-class Recorder(object):
-
-    def __init__(self, name, length=100):
-        self._name = name
-        self._length = length
-        self._num = np.zeros(length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def reset(self):
-        self._num = np.zeros(self._length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def update(self, x):
-        self._sum += x
-        self._count += 1
-        self._num[self._index] = x
-        self._index += 1
-        if self._index >= self._length:
-            self._full = True
-            self._index = 0
-
-    def get(self, recent=True):
-        if recent:
-            if self._full:
-                val = self._num.mean()
-            else:
-                val = self._num[:self._index].mean()
-        else:
-            val = self._sum / self._count
-        return (self._name, val)
+from utils import get_logger, Recorder
 
 
 class SumL2Loss(gl.loss.Loss):
@@ -72,9 +34,10 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, criterion, ctx, data, ht, mask, is_train=True):
+def forward_backward(net, ctx, data, ht, mask, is_train=True):
     n = len(ht)
     m = len(ctx)
+    criterion = SumL2Loss()
     data = gl.utils.split_and_load(data, ctx)
     ht = [gl.utils.split_and_load(x, ctx) for x in ht]
     mask = [gl.utils.split_and_load(x, ctx) for x in mask]
@@ -124,7 +87,6 @@ def main():
     parser.add_argument('--steps', type=str, default='1000')
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--prefix', type=str, default='default', help='model description')
-    parser.add_argument('--fixbn', action='store_true')
     args = parser.parse_args()
     print(args)
     # seed
@@ -143,7 +105,6 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
-    fixbn = args.fixbn
     prefix = args.prefix
     base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     logger = get_logger()
@@ -159,12 +120,10 @@ def main():
     num_kps = cfg.NUM_LANDMARK
     net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
     creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    net.init_backbone(creator, featname, fixed, pretrained=True, fixbn=fixbn)
+    net.init_backbone(creator, featname, fixed, pretrained=True)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
-    criterion = SumL2Loss()
     net.hybridize()
-    criterion.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -194,7 +153,7 @@ def main():
             # [(l1, l2, ...), (l1, l2, ...)]
             ht = [ht4, ht8, ht16]
             mask = [mask4, mask8, mask16]
-            losses = forward_backward(net, criterion, ctx, data, ht, mask, is_train=True)
+            losses = forward_backward(net, ctx, data, ht, mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -219,7 +178,7 @@ def main():
         for batch_idx, (data, ht4, mask4, ht8, mask8, ht16, mask16) in enumerate(testloader):
             ht = [ht4, ht8, ht16]
             mask = [mask4, mask8, mask16]
-            losses = forward_backward(net, criterion, ctx, data, ht, mask, is_train=False)
+            losses = forward_backward(net, ctx, data, ht, mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)

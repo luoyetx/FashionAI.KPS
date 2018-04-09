@@ -14,48 +14,10 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
+from config import cfg
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, load_model
-from config import cfg
-from utils import get_logger
-
-
-class Recorder(object):
-
-    def __init__(self, name, length=100):
-        self._name = name
-        self._length = length
-        self._num = np.zeros(length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def reset(self):
-        self._num = np.zeros(self._length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def update(self, x):
-        self._sum += x
-        self._count += 1
-        self._num[self._index] = x
-        self._index += 1
-        if self._index >= self._length:
-            self._full = True
-            self._index = 0
-
-    def get(self, recent=True):
-        if recent:
-            if self._full:
-                val = self._num.mean()
-            else:
-                val = self._num[:self._index].mean()
-        else:
-            val = self._sum / self._count
-        return (self._name, val)
+from utils import get_logger, Recorder
 
 
 class SumL2Loss(gl.loss.Loss):
@@ -70,7 +32,8 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
+def forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
+    criterion = SumL2Loss()
     data = gl.utils.split_and_load(data, ctx)
     heatmap = gl.utils.split_and_load(heatmap, ctx)
     heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
@@ -129,7 +92,6 @@ def main():
     parser.add_argument('--start-epoch', type=int, default=1)
     parser.add_argument('--model-path', type=str, default='')
     parser.add_argument('--prefix', type=str, default='default', help='model description')
-    parser.add_argument('--fixbn', action='store_true')
     args = parser.parse_args()
     print(args)
     # seed
@@ -149,7 +111,6 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
-    fixbn = args.fixbn
     start_epoch = args.start_epoch
     prefix = args.prefix
     model_path = None if args.model_path == '' else args.model_path
@@ -169,7 +130,7 @@ def main():
         num_limb = len(cfg.PAF_LANDMARK_PAIR)
         net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-        net.init_backbone(creator, featname, fixed, pretrained=True, fixbn=fixbn)
+        net.init_backbone(creator, featname, fixed, pretrained=True)
         net.initialize(mx.init.Normal(), ctx=ctx)
         net.collect_params().reset_ctx(ctx)
     else:
@@ -177,9 +138,7 @@ def main():
         logger.info('Load net from %s', model_path)
         net = load_model(model_path)
         net.collect_params().reset_ctx(ctx)
-    criterion = SumL2Loss()
     net.hybridize()
-    criterion.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -215,7 +174,7 @@ def main():
         sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
-            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
+            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -238,7 +197,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(testloader):
-            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
+            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)

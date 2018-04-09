@@ -113,6 +113,44 @@ def mkdir(path):
         os.mkdir(path)
 
 
+class Recorder(object):
+
+    def __init__(self, name, length=100):
+        self._name = name
+        self._length = length
+        self._num = np.zeros(length)
+        self._full = False
+        self._index = 0
+        self._sum = 0
+        self._count = 0
+
+    def reset(self):
+        self._num = np.zeros(self._length)
+        self._full = False
+        self._index = 0
+        self._sum = 0
+        self._count = 0
+
+    def update(self, x):
+        self._sum += x
+        self._count += 1
+        self._num[self._index] = x
+        self._index += 1
+        if self._index >= self._length:
+            self._full = True
+            self._index = 0
+
+    def get(self, recent=True):
+        if recent:
+            if self._full:
+                val = self._num.mean()
+            else:
+                val = self._num[:self._index].mean()
+        else:
+            val = self._sum / self._count
+        return (self._name, val)
+
+
 def detect_kps_v1(img, heatmap, paf, category):
     h, w = img.shape[:2]
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)

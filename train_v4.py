@@ -14,48 +14,10 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
+from config import cfg
 from dataset import FashionAIKPSDataSet
 from model import PoseNet, CascadePoseNet, MaskPoseNet
-from config import cfg
-from utils import get_logger
-
-
-class Recorder(object):
-
-    def __init__(self, name, length=100):
-        self._name = name
-        self._length = length
-        self._num = np.zeros(length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def reset(self):
-        self._num = np.zeros(self._length)
-        self._full = False
-        self._index = 0
-        self._sum = 0
-        self._count = 0
-
-    def update(self, x):
-        self._sum += x
-        self._count += 1
-        self._num[self._index] = x
-        self._index += 1
-        if self._index >= self._length:
-            self._full = True
-            self._index = 0
-
-    def get(self, recent=True):
-        if recent:
-            if self._full:
-                val = self._num.mean()
-            else:
-                val = self._num[:self._index].mean()
-        else:
-            val = self._sum / self._count
-        return (self._name, val)
+from utils import get_logger, Recorder
 
 
 class SumL2Loss(gl.loss.Loss):
@@ -74,7 +36,7 @@ class SumL2Loss(gl.loss.Loss):
 
 class SigmoidLoss(gl.loss.Loss):
 
-    def __init__(self, weight=1., batch_axis=0, **kwargs):
+    def __init__(self, weight=5., batch_axis=0, **kwargs):
         super(SigmoidLoss, self).__init__(weight, batch_axis, **kwargs)
 
     def hybrid_forward(self, F, pred, label, mask, sample_weight=None):
@@ -83,12 +45,14 @@ class SigmoidLoss(gl.loss.Loss):
         loss = F.relu(pred) - pred * label + F.Activation(-F.abs(pred), act_type='softrelu')
         loss = F.elemwise_mul(loss, mask)
         loss = gl.loss._apply_weighting(F, loss, self._weight, sample_weight)
-        return F.sum(loss, axis=self._batch_axis, exclude=True)
+        return F.mean(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, criterion, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True):
+def forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True):
     n = len(ht)
     m = len(ctx)
+    criterion1 = SigmoidLoss()
+    criterion2 = SumL2Loss()
     data = gl.utils.split_and_load(data, ctx)
     ht = gl.utils.split_and_load(ht, ctx)
     ht_mask = gl.utils.split_and_load(ht_mask, ctx)
@@ -101,8 +65,8 @@ def forward_backward(net, criterion, ctx, data, ht, ht_mask, obj, obj_mask, is_t
         # forward
         obj_pred, heatmap_pred = net(data_)
         # global
-        losses_ = [SigmoidLoss()(obj_pred, obj_, obj_mask_),
-                   SumL2Loss()(heatmap_pred, ht_, ht_mask_)]
+        losses_ = [criterion1(obj_pred, obj_, obj_mask_),
+                   criterion2(heatmap_pred, ht_, ht_mask_)]
         losses.append(losses_)
         # backward
         if is_train:
@@ -138,7 +102,6 @@ def main():
     parser.add_argument('--steps', type=str, default='50')
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--prefix', type=str, default='default', help='model description')
-    parser.add_argument('--fixbn', action='store_true')
     args = parser.parse_args()
     print(args)
     # seed
@@ -157,7 +120,6 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     backbone = args.backbone
-    fixbn = args.fixbn
     prefix = args.prefix
     base_name = 'V4.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     logger = get_logger()
@@ -173,12 +135,10 @@ def main():
     num_kps = cfg.NUM_LANDMARK
     net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
     creator, featname, fixed = cfg.BACKBONE_v4[backbone]
-    net.init_backbone(creator, featname, fixed, pretrained=True, fixbn=fixbn)
+    net.init_backbone(creator, featname, fixed, pretrained=True)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
-    criterion = SumL2Loss()
-    #net.hybridize()
-    criterion.hybridize()
+    net.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -205,7 +165,7 @@ def main():
             rd.reset()
         sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, ht, ht_mask, obj, obj_mask) in enumerate(trainloader):
-            losses = forward_backward(net, criterion, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True)
+            losses = forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -228,7 +188,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, (data, ht, ht_mask, obj, obj_mask) in enumerate(testloader):
-            losses = forward_backward(net, criterion, ctx, data, ht, ht_mask, obj, obj_mask, is_train=False)
+            losses = forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
