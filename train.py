@@ -32,8 +32,7 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
-    criterion = SumL2Loss()
+def forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True):
     data = gl.utils.split_and_load(data, ctx)
     heatmap = gl.utils.split_and_load(heatmap, ctx)
     heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
@@ -107,6 +106,7 @@ def main():
     optim = args.optim
     batch_size = args.batch_size
     iter_size = args.iter_size
+    assert iter_size == 1
     epoches = args.epoches
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
@@ -132,13 +132,16 @@ def main():
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
         net.init_backbone(creator, featname, fixed, pretrained=True)
         net.initialize(mx.init.Normal(), ctx=ctx)
-        net.collect_params().reset_ctx(ctx)
     else:
         model_path = model_path or './output/%s-%04d.params' % (base_name, start_epoch - 1)
         logger.info('Load net from %s', model_path)
         net = load_model(model_path)
-        net.collect_params().reset_ctx(ctx)
+    net.collect_params().reset_ctx(ctx)
+    # for p in net.collect_params().values():
+    #     p.grad_req = 'add'
     net.hybridize()
+    criterion = SumL2Loss()
+    criterion.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -174,7 +177,8 @@ def main():
         sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
-            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
+            net.collect_params().zero_grad()
+            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -197,7 +201,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, (data, heatmap, paf, heatmap_mask, paf_mask) in enumerate(testloader):
-            losses = forward_backward(net, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
+            losses = forward_backward(net, criterion, ctx, data, heatmap, paf, heatmap_mask, paf_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)

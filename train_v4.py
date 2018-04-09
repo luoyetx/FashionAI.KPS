@@ -48,11 +48,9 @@ class SigmoidLoss(gl.loss.Loss):
         return F.mean(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True):
+def forward_backward(net, criterion1, criterion2, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True):
     n = len(ht)
     m = len(ctx)
-    criterion1 = SigmoidLoss()
-    criterion2 = SumL2Loss()
     data = gl.utils.split_and_load(data, ctx)
     ht = gl.utils.split_and_load(ht, ctx)
     ht_mask = gl.utils.split_and_load(ht_mask, ctx)
@@ -116,6 +114,7 @@ def main():
     optim = args.optim
     batch_size = args.batch_size
     iter_size = args.iter_size
+    assert iter_size == 1
     epoches = args.epoches
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
@@ -138,7 +137,13 @@ def main():
     net.init_backbone(creator, featname, fixed, pretrained=True)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
+    # for p in net.collect_params().values():
+    #     p.grad_req = 'add'
     net.hybridize()
+    criterion1 = SigmoidLoss()
+    criterion2 = SumL2Loss()
+    criterion1.hybridize()
+    criterion2.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -151,8 +156,6 @@ def main():
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)
-    # net(mx.nd.zeros(shape=(1, 3, 368, 368), ctx=ctx[0]))
-    # sw.add_graph(net)
     rds = [Recorder('obj', freq), Recorder('heatmap', freq)]
     # meta info
     global_step = 0
@@ -165,7 +168,8 @@ def main():
             rd.reset()
         sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, (data, ht, ht_mask, obj, obj_mask) in enumerate(trainloader):
-            losses = forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True)
+            net.collect_params().zero_grad()
+            losses = forward_backward(net, criterion1, criterion2, ctx, data, ht, ht_mask, obj, obj_mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -188,7 +192,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, (data, ht, ht_mask, obj, obj_mask) in enumerate(testloader):
-            losses = forward_backward(net, ctx, data, ht, ht_mask, obj, obj_mask, is_train=False)
+            losses = forward_backward(net, criterion1, criterion2, ctx, data, ht, ht_mask, obj, obj_mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)

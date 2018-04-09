@@ -34,10 +34,9 @@ class SumL2Loss(gl.loss.Loss):
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward(net, ctx, data, ht, mask, is_train=True):
+def forward_backward(net, criterion, ctx, data, ht, mask, is_train=True):
     n = len(ht)
     m = len(ctx)
-    criterion = SumL2Loss()
     data = gl.utils.split_and_load(data, ctx)
     ht = [gl.utils.split_and_load(x, ctx) for x in ht]
     mask = [gl.utils.split_and_load(x, ctx) for x in mask]
@@ -101,6 +100,7 @@ def main():
     optim = args.optim
     batch_size = args.batch_size
     iter_size = args.iter_size
+    assert iter_size == 1
     epoches = args.epoches
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
@@ -123,7 +123,11 @@ def main():
     net.init_backbone(creator, featname, fixed, pretrained=True)
     net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
+    # for p in net.collect_params().values():
+    #     p.grad_req = 'add'
     net.hybridize()
+    criterion = SumL2Loss()
+    criterion.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
@@ -136,8 +140,6 @@ def main():
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)
-    # net(mx.nd.zeros(shape=(1, 3, 368, 368), ctx=ctx[0]))
-    # sw.add_graph(net)
     rds = [Recorder('Global-04', freq), Recorder('Global-08', freq), Recorder('Global-16', freq), Recorder('Refine', freq)]
     # meta info
     global_step = 0
@@ -153,7 +155,8 @@ def main():
             # [(l1, l2, ...), (l1, l2, ...)]
             ht = [ht4, ht8, ht16]
             mask = [mask4, mask8, mask16]
-            losses = forward_backward(net, ctx, data, ht, mask, is_train=True)
+            net.collect_params().zero_grad()
+            losses = forward_backward(net, criterion, ctx, data, ht, mask, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -178,7 +181,7 @@ def main():
         for batch_idx, (data, ht4, mask4, ht8, mask8, ht16, mask16) in enumerate(testloader):
             ht = [ht4, ht8, ht16]
             mask = [mask4, mask8, mask16]
-            losses = forward_backward(net, ctx, data, ht, mask, is_train=False)
+            losses = forward_backward(net, criterion, ctx, data, ht, mask, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
