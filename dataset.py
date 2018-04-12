@@ -7,6 +7,7 @@ import mxnet as mx
 from mxnet import gluon as gl
 import pandas as pd
 import numpy as np
+from imgaug import augmenters as iaa
 
 from config import cfg
 from utils import process_cv_img, reverse_to_cv_img, crop_patch
@@ -17,10 +18,26 @@ pyximport.install(setup_args={'include_dirs': np.get_include()})
 from heatmap import putGaussianMaps, putVecMaps
 
 
+def random_aug_img(img):
+    seq = iaa.Sequential([
+        iaa.Sometimes(0.2, iaa.SomeOf(1, [
+            iaa.GaussianBlur(sigma=(0, 1))]),
+            iaa.MedianBlur(k=[1, 3]),
+            iaa.AverageBlur(k=[1, 2]),
+        ),
+        iaa.Sometimes(0.2, iaa.Grayscale(alpha=[0.8, 1.], from_colorspace='BGR')),
+        iaa.Sometimes(0.2, iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 0.05*255), per_channel=0.5)),
+        iaa.Sometimes(0.5, iaa.AddToHueAndSaturation((-20, 20))),
+        iaa.Sometimes(0.2, iaa.ContrastNormalization((0.5, 2.0), per_channel=0.5)),
+        ], random_order=True)
+    img = seq.augment_images(img[np.newaxis])[0]
+    return img
+
+
 def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
     # flip
-    if np.random.rand() > 0.5 and is_train:
+    if np.random.rand() < 0.5 and is_train:
         img = cv2.flip(img, 1)
         kps[:, 0] = width - kps[:, 0]
         for i, j in cfg.LANDMARK_SWAP:
@@ -62,6 +79,9 @@ def transform(img, kps, is_train=True):
     height, width = img.shape[:2]
     kps[:, 0] -= x1
     kps[:, 1] -= y1
+    # image augment
+    if is_train:
+        img = random_aug_img(img)
     # fill missing
     kps[kps[:, 2] == -1, :2] = -1
     return img, kps

@@ -87,6 +87,7 @@ def main():
     parser.add_argument('--cpm-channels', type=int, default=64)
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')
+    parser.add_argument('--lr-decay', type=float, default=0.1)
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--start-epoch', type=int, default=1)
     parser.add_argument('--model-path', type=str, default='')
@@ -110,6 +111,7 @@ def main():
     epoches = args.epoches
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
+    lr_decay = args.lr_decay
     backbone = args.backbone
     start_epoch = args.start_epoch
     prefix = args.prefix
@@ -144,7 +146,7 @@ def main():
     criterion.hybridize()
     # trainer
     steps = [epoch_size * x for x in steps]
-    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=0.1)
+    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=lr_decay)
     if optim == 'sgd':
         trainer = gl.trainer.Trainer(net.collect_params(), 'sgd', {'learning_rate': lr, 'wd': wd, 'momentum': 0.9, 'lr_scheduler': lr_scheduler})
     else:

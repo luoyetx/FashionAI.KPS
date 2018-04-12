@@ -23,7 +23,11 @@ fix eval
 - v2.7 V2.more_data_longterm-vgg19-S5-C64-BS32-sgd-0063.params, heatmap test err 5.213, err on val 0.076914, public 0.0805
 - v2.8 based on v2.7 using cv2.INTER_CUBIC, err on val 0.070487, public 0.0755
 - v2.9 based on v2.8 using paf flip and mutli scale, err on val 0.054828, public 0.0589
-- v2.10
+
+more augment, fix augment, center on image not object
+
+- v2.10 V2.default.fresh-vgg19-S5-C64-BS32-sgd-0081.params, heatmap test err 5.043, err on val 0.052433, public 0.0549
+- v2.11 V2.default.fresh-vgg19-S5-C64-BS32-sgd-0087.params, heatmap test err 5.026, err on val 0.050738, public 0.0543
 
 v3
 ==

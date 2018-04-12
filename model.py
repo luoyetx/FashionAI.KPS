@@ -308,7 +308,7 @@ class MaskHeatHead(gl.HybridBlock):
         mask_to_feat = F.sigmoid(mask)
         mask_to_feat = F.max(mask_to_feat, axis=1, keepdims=True)
         mask_to_feat = F.exp(mask_to_feat)
-        mask_to_feat = F.BlockGrad(mask_to_feat)
+        mask_to_feat = F.stop_gradient(mask_to_feat)
         feat = F.broadcast_mul(feat, mask_to_feat)
         heatmap = self.heat_pred(feat)
         return feat, mask, heatmap
