@@ -12,8 +12,8 @@ import pandas as pd
 from config import cfg
 from dataset import FashionAIKPSDataSet
 from model import load_model, multi_scale_predict
-from utils import draw_heatmap, draw_paf, draw_kps
-from utils import process_cv_img, detect_kps_v1, detect_kps_v3, get_logger
+from utils import draw_heatmap, draw_paf, draw_kps, get_logger
+from detect_kps import detect_kps_v1, detect_kps_v3
 
 
 def calc_error(kps_pred, kps_gt, category):

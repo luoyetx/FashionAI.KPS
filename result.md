@@ -28,6 +28,16 @@ more augment, fix augment, center on image not object
 
 - v2.10 V2.default.fresh-vgg19-S5-C64-BS32-sgd-0081.params, heatmap test err 5.043, err on val 0.052433, public 0.0549
 - v2.11 V2.default.fresh-vgg19-S5-C64-BS32-sgd-0087.params, heatmap test err 5.026, err on val 0.050738, public 0.0543
+- v2.12 V2.default.more_data.fint-vgg19-S5-C64-BS32-sgd-0019.params heatmap test err 4.964, err on val 0.048695, public 0.0546
+- v2.13 V2.default.more_data.fint-vgg19-S5-C64-BS32-sgd-0046.params heatmap test err 4.895, err on val 0.048706, public 0.0542
+
+fix scale from [512, 440, 386] to [512, 368, 224]
+
+- v2.14 based on v2.12, err on val 0.045472, public 0.0505
+
+predict missing with similarity trans
+
+- v2.15 based on v2.14, err on val 0.045404, public 0.0506
 
 v3
 ==

@@ -11,8 +11,8 @@ import pandas as pd
 
 from config import cfg
 from model import load_model, multi_scale_predict
-from utils import draw_heatmap, draw_paf, draw_kps
-from utils import detect_kps_v1, detect_kps_v3, get_logger
+from utils import draw_heatmap, draw_paf, draw_kps, get_logger
+from detect_kps import detect_kps_v1, detect_kps_v3
 
 
 file_pattern = './result/tmp_result_%d.csv'
@@ -100,6 +100,7 @@ def main():
     # data
     data_dir = cfg.DATA_DIR
     df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
+    #df = df.sample(frac=1)
     num_worker = args.num_worker
     num_sample = len(df) // num_worker + 1
     dfs = [df[i*num_sample: (i+1)*num_sample] for i in range(num_worker)]

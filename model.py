@@ -393,7 +393,7 @@ def load_model(model, version=2):
 def multi_scale_predict(net, ctx, version, img, multi_scale=False):
     if not multi_scale:
         return net.predict(img, ctx)
-    scales = [512, 440, 386]
+    scales = [512, 368, 224]
     h, w = img.shape[:2]
     if version == 2:
         heatmap = 0

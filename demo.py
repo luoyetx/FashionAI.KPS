@@ -11,8 +11,8 @@ import pandas as pd
 
 from dataset import FashionAIKPSDataSet
 from model import load_model
-from utils import draw_heatmap, draw_paf, draw_kps
-from utils import reverse_to_cv_img, detect_kps_v1, detect_kps_v3
+from utils import draw_heatmap, draw_paf, draw_kps, reverse_to_cv_img
+from detect_kps import detect_kps_v1, detect_kps_v3
 from config import cfg
 
 
