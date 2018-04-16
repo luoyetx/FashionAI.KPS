@@ -275,6 +275,59 @@ class CascadePoseNet(gl.HybridBlock):
 
 ##### model for version 4
 
+class BiCRNNBlock(gl.HybridBlock):
+
+    def __init__(self, num_channel, num_len):
+        super(BiCRNNBlock, self).__init__()
+        self.num_channel = num_channel
+        self.num_len = num_len
+        self.size = 368 // 8
+        with self.name_scope():
+            # forward
+            self.xhnet = self.fnet()
+            self.hhnet = self.fnet()
+            self.honet = self.onet()
+            # backward
+            self.bxhnet = self.fnet()
+            self.bhhnet = self.fnet()
+            self.bhonet = self.onet()
+            # trans x
+            self.xnet = nn.Conv2D(1, 3, 1, 1)
+
+    def fnet(self):
+        net = nn.HybridSequential()
+        with net.name_scope():
+            #net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
+            net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
+        return net
+
+    def onet(self):
+        net = nn.HybridSequential()
+        with net.name_scope():
+            #net.add(nn.Conv2D(self.num_channel, 3, 1, 1, activation='relu'))
+            net.add(nn.Conv2D(1, 3, 1, 1))
+        return net
+
+    def hybrid_forward(self, F, x):
+        xs = F.split(x, axis=1, num_outputs=self.num_len)
+        # forward phase
+        hidden = self.xhnet(xs[0])
+        ys = [hidden]
+        for i in range(1, self.num_len):
+            hidden = F.tanh(self.xhnet(xs[i]) + self.hhnet(hidden))
+            ys.append(hidden)
+        # backward phase
+        hidden = self.bxhnet(xs[self.num_len - 1])
+        bys = [hidden]
+        for i in range(1, self.num_len):
+            j = self.num_len - i - 1
+            hidden = F.tanh(self.bxhnet(xs[j]) + self.bhhnet(hidden))
+            bys.append(hidden)
+        y = [self.xnet(xs[i]) + self.honet(ys[i]) + self.bhonet(bys[i]) for i in range(self.num_len)]
+        y = F.concat(*y)
+        return y
+
+
 class MaskHeatHead(gl.HybridBlock):
 
     def __init__(self, num_output, num_channel=128):
@@ -320,12 +373,20 @@ class MaskPoseNet(gl.HybridBlock):
         super(MaskPoseNet, self).__init__()
         with self.name_scope():
             self.backbone = None
+            self.feature_trans = nn.HybridSequential()
+            self.feature_trans.add(nn.Conv2D(2*num_channel, 3, 1, 1, activation='relu'),
+                                   nn.Conv2D(num_channel, 3, 1, 1, activation='relu'))
             self.head = MaskHeatHead(num_kps + 1, num_channel)
+            self.sbcrnn = nn.HybridSequential()
+            for _ in range(3):
+                self.sbcrnn.add(BiCRNNBlock(num_channel=num_channel//2, num_len=num_kps+1))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
+        feat = self.feature_trans(feat)
         feat, mask, heatmap = self.head(feat)
-        return mask, heatmap
+        heatmap_refine = self.sbcrnn(heatmap)
+        return mask, heatmap, heatmap_refine
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
         install_backbone(self, creator, [featname], fixed, pretrained)
@@ -334,7 +395,7 @@ class MaskPoseNet(gl.HybridBlock):
         data = process_cv_img(img)
         data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        mask, heatmap = self(batch)
+        mask, _, heatmap = self(batch)
         mask = nd.sigmoid(mask)
         heatmap = heatmap[0].asnumpy().astype('float64')
         mask = mask[0].asnumpy().astype('float64')

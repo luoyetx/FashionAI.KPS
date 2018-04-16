@@ -61,10 +61,11 @@ def forward_backward(net, criterion1, criterion2, ctx, data, ht, ht_mask, obj, o
     losses = []
     for data_, ht_, ht_mask_, obj_, obj_mask_ in zip(data, ht, ht_mask, obj, obj_mask):
         # forward
-        obj_pred, heatmap_pred = net(data_)
+        obj_pred, ht_global_pred, ht_refine_pred = net(data_)
         # global
         losses_ = [criterion1(obj_pred, obj_, obj_mask_),
-                   criterion2(heatmap_pred, ht_, ht_mask_)]
+                   criterion2(ht_global_pred, ht_, ht_mask_),
+                   criterion2(ht_refine_pred, ht_, ht_mask_)]
         losses.append(losses_)
         # backward
         if is_train:
@@ -158,7 +159,7 @@ def main():
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)
-    rds = [Recorder('obj', freq), Recorder('heatmap', freq)]
+    rds = [Recorder('mask', freq), Recorder('ht_global', freq), Recorder('ht_refine', freq)]
     # meta info
     global_step = 0
     # update ctx

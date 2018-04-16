@@ -34,10 +34,9 @@ more augment, fix augment, center on image not object
 fix scale from [512, 440, 386] to [512, 368, 224]
 
 - v2.14 based on v2.12, err on val 0.045472, public 0.0505
+- v2.15 based on v2.14 predict missing with similarity trans, err on val 0.045404, public 0.0506
 
-predict missing with similarity trans
 
-- v2.15 based on v2.14, err on val 0.045404, public 0.0506
 
 v3
 ==
