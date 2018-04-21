@@ -37,6 +37,29 @@ def predict_missing(img, kps, category):
     return kps
 
 
+def predict_missing_with_center(img, kps, category):
+    # fill missing
+    h, w = img.shape[:2]
+    landmark_idx = cfg.LANDMARK_IDX[category]
+    keep = kps[:, 2] == 1
+    if keep.sum() != 0:
+        xmin = kps[keep, 0].min()
+        xmax = kps[keep, 0].max()
+        ymin = kps[keep, 1].min()
+        ymax = kps[keep, 1].max()
+        xc = (xmin + xmax) // 2
+        yc = (ymin + ymax) // 2
+    else:
+        xc = w // 2
+        yc = h // 2
+    for idx in landmark_idx:
+        if kps[idx, 2] == -1:
+            kps[idx, 0] = xc
+            kps[idx, 1] = yc
+            kps[idx, 2] = 0
+    return kps
+
+
 def detect_kps_v1(img, heatmap, paf, category):
     h, w = img.shape[:2]
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
@@ -122,7 +145,7 @@ def detect_kps_v1(img, heatmap, paf, category):
             kps[j, 1] = cand[idx][1]
             kps[j, 2] = 1
     # missing
-    kps = predict_missing(img, kps, category)
+    kps = predict_missing_with_center(img, kps, category)
     return kps
 
 
@@ -252,5 +275,5 @@ def detect_kps_v3(img, heatmap, category):
         kps[idx, 1] = y
         kps[idx, 2] = 1
     # missing
-    kps = predict_missing(img, kps, category)
+    kps = predict_missing_with_center(img, kps, category)
     return kps

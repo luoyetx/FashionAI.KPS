@@ -330,21 +330,22 @@ class BiCRNNBlock(gl.HybridBlock):
 
 class MaskHeatHead(gl.HybridBlock):
 
-    def __init__(self, num_output, num_channel=128):
+    def __init__(self, num_output, num_channel):
         super(MaskHeatHead, self).__init__()
         with self.name_scope():
             self.feat_trans = nn.HybridSequential()
-            ks = [7, 7, 7, 7, 7, 1, 1]
+            ks = [7, 7, 7, 7, 7]
             for k in ks:
                 self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
             self.mask_pred = nn.HybridSequential()
             self.mask_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
                                nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
                                nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
                                nn.Conv2D(5, 3, 1, 1))
             self.heat_pred = nn.HybridSequential()
             self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
                                nn.Conv2D(num_output, 3, 1, 1))
             self.set_lr_mult(self.feat_trans)
             self.set_lr_mult(self.mask_pred)
@@ -364,7 +365,36 @@ class MaskHeatHead(gl.HybridBlock):
         mask_to_feat = F.stop_gradient(mask_to_feat)
         feat = F.broadcast_mul(feat, mask_to_feat)
         heatmap = self.heat_pred(feat)
-        return feat, mask, heatmap
+        return feat, mask, mask_to_feat, heatmap
+
+
+class RefineNet(gl.HybridBlock):
+
+    def __init__(self, num_output, num_channel):
+        super(RefineNet, self).__init__()
+        with self.name_scope():
+            self.feat_trans = nn.HybridSequential()
+            ks = [7, 7, 7, 7, 7]
+            for k in ks:
+                self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
+            self.heat_pred = nn.HybridSequential()
+            self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
+                               nn.Conv2D(num_output, 3, 1, 1))
+            self.set_lr_mult(self.feat_trans)
+            self.set_lr_mult(self.heat_pred)
+
+    def set_lr_mult(self, net):
+        for conv in net:
+            conv.weight.lr_mult = 4
+            conv.bias.lr_mult = 8
+
+    def hybrid_forward(self, F, x, mask_to_feat):
+        feat = self.feat_trans(x)
+        feat = F.broadcast_mul(feat, mask_to_feat)
+        heatmap = self.heat_pred(feat)
+        return heatmap
 
 
 class MaskPoseNet(gl.HybridBlock):
@@ -377,15 +407,14 @@ class MaskPoseNet(gl.HybridBlock):
             self.feature_trans.add(nn.Conv2D(2*num_channel, 3, 1, 1, activation='relu'),
                                    nn.Conv2D(num_channel, 3, 1, 1, activation='relu'))
             self.head = MaskHeatHead(num_kps + 1, num_channel)
-            self.sbcrnn = nn.HybridSequential()
-            for _ in range(3):
-                self.sbcrnn.add(BiCRNNBlock(num_channel=num_channel//2, num_len=num_kps+1))
+            self.refine = RefineNet(num_kps + 1, num_channel)
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
         feat = self.feature_trans(feat)
-        feat, mask, heatmap = self.head(feat)
-        heatmap_refine = self.sbcrnn(heatmap)
+        feat_with_mask, mask, mask_to_feat, heatmap = self.head(feat)
+        feat = F.concat(feat, feat_with_mask, heatmap)
+        heatmap_refine = self.refine(feat, mask_to_feat)
         return mask, heatmap, heatmap_refine
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
@@ -451,15 +480,24 @@ def load_model(model, version=2):
     return net
 
 
-def multi_scale_predict(net, ctx, version, img, multi_scale=False):
+def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
     if not multi_scale:
         return net.predict(img, ctx)
-    scales = [512, 368, 224]
+    # if category in ['dress']:
+    #     scales = [400]
+    # elif category in ['blouse', 'skirt']:
+    #     scales = [440, 368, 224]
+    # else:
+    #     scales = [400, 368, 296]
+    scales = [440, 368, 224]
     h, w = img.shape[:2]
     if version == 2:
         heatmap = 0
         paf = 0
+    elif version == 3:
+        heatmap = 0
     else:
+        mask = 0
         heatmap = 0
     for scale in scales:
         factor = scale / max(h, w)
@@ -470,14 +508,24 @@ def multi_scale_predict(net, ctx, version, img, multi_scale=False):
             paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
             heatmap = heatmap + heatmap_
             paf = paf + paf_
-        else:
+        elif version == 3:
             heatmap_ = net.predict(img, ctx)
             heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            heatmap = heatmap + heatmap_
+        else:
+            mask_, heatmap_ = net.predict(img, ctx)
+            mask_ = cv2.resize(mask_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            mask = mask + mask_
             heatmap = heatmap + heatmap_
     if version == 2:
         heatmap /= len(scales)
         paf /= len(scales)
         return heatmap, paf
-    else:
+    elif version == 3:
         heatmap /= len(scales)
         return heatmap
+    else:
+        mask /= len(scales)
+        heatmap /= len(scales)
+        return mask, heatmap

@@ -66,10 +66,13 @@ def main():
         kps_gt = testdata.kps[i]
         # predict
         if version == 2:
-            heatmap, paf = multi_scale_predict(net, ctx, version, img, multi_scale)
+            heatmap, paf = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v1(img, heatmap, paf, category)
+        elif version == 3:
+            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
+            kps_pred = detect_kps_v3(img, heatmap, category)
         else:
-            heatmap = multi_scale_predict(net, ctx, version, img, multi_scale)
+            mask, heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
         # calc_error
         error = calc_error(kps_pred, kps_gt, category)
@@ -102,7 +105,7 @@ def main():
                 cv2.imshow('kps_pred', dr3)
                 cv2.imshow('htall', dr4)
                 cv2.imshow('kps_gt', dr5)
-            else:
+            elif version == 3:
                 heatmap = heatmap[landmark_idx].max(axis=0)
                 dr1 = draw_heatmap(img, heatmap)
                 dr2 = draw_kps(img, kps_pred)
@@ -110,6 +113,20 @@ def main():
                 cv2.imshow('heatmap', dr1)
                 cv2.imshow('kps_pred', dr2)
                 cv2.imshow('kps_gt', dr3)
+            else:
+                cate_idx = cfg.CATEGORY.index(category)
+                dr1 = draw_heatmap(img, heatmap[landmark_idx].max(axis=0))
+                dr2 = draw_heatmap(img, heatmap[-1])
+                dr3 = draw_heatmap(img, mask.max(axis=0))
+                dr4 = draw_heatmap(img, mask[cate_idx])
+                dr5 = draw_kps(img, kps_pred)
+                dr6 = draw_kps(img, kps_gt)
+                cv2.imshow('heatmap', dr1)
+                cv2.imshow('htall', dr2)
+                cv2.imshow('full mask', dr3)
+                cv2.imshow('cate mask', dr4)
+                cv2.imshow('kps_pred', dr5)
+                cv2.imshow('kps_gt', dr6)
             key = cv2.waitKey(0)
             if key == 27:
                 break

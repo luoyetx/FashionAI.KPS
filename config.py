@@ -59,6 +59,7 @@ cfg.BACKBONE_v3 = {
 
 cfg.BACKBONE_v4 = {
     'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v2, 'stage2__plus3', ['conv0']),
 }
 
 cfg.EVAL_NORMAL_IDX = {

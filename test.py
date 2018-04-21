@@ -33,7 +33,7 @@ def work_func(df, idx, args):
     net.hybridize()
     # data
     image_ids = df['image_id'].tolist()
-    image_paths = [os.path.join(data_dir, 'test', img_id) for img_id in image_ids]
+    image_paths = [os.path.join(data_dir, 'test-b', img_id) for img_id in image_ids]
     image_categories = df['image_category'].tolist()
     # run
     result = []
@@ -41,10 +41,10 @@ def work_func(df, idx, args):
         img = cv2.imread(path)
         # predict
         if version == 2:
-            heatmap, paf = multi_scale_predict(net, ctx, version, img, multi_scale)
+            heatmap, paf = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v1(img, heatmap, paf, category)
         else:
-            heatmap = multi_scale_predict(net, ctx, version, img, multi_scale)
+            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
         result.append(kps_pred)
         # show
@@ -99,7 +99,7 @@ def main():
     print(args)
     # data
     data_dir = cfg.DATA_DIR
-    df = pd.read_csv(os.path.join(data_dir, 'test/test.csv'))
+    df = pd.read_csv(os.path.join(data_dir, 'test-b/test.csv'))
     #df = df.sample(frac=1)
     num_worker = args.num_worker
     num_sample = len(df) // num_worker + 1
