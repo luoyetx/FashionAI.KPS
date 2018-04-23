@@ -248,12 +248,13 @@ class FashionAIKPSDataSet(gl.data.Dataset):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', type=int, default=2)
+    parser.add_argument('--type', type=str, default='train', choices=['train', 'test'])
     args = parser.parse_args()
     print(args)
     version = args.version
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
-    dataset = FashionAIKPSDataSet(df, version=version)
+    dataset = FashionAIKPSDataSet(df, version=version, is_train=args.type == 'train')
     print('DataSet Size', len(dataset))
     for idx, pack in enumerate(dataset):
         if version == 2:

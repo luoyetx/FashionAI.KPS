@@ -30,13 +30,11 @@ class SumL2Loss(gl.loss.Loss):
         label = F.elemwise_mul(label, mask)
         label = gl.loss._reshape_like(F, label, pred)
         loss = F.square(pred - label)
-        loss = gl.loss._apply_weighting(F, loss, self._weight/2, sample_weight)
+        loss = gl.loss._apply_weighting(F, loss, self._weight / 2, sample_weight)
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
 def forward_backward(net, criterion, ctx, data, ht, mask, is_train=True):
-    n = len(ht)
-    m = len(ctx)
     data = gl.utils.split_and_load(data, ctx)
     ht = [gl.utils.split_and_load(x, ctx) for x in ht]
     mask = [gl.utils.split_and_load(x, ctx) for x in mask]
@@ -79,7 +77,7 @@ def main():
     parser.add_argument('--iter-size', type=int, default=1)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--wd', type=float, default=1e-5)
+    parser.add_argument('--wd', type=float, default=1e-4)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
     parser.add_argument('--num-channel', type=int, default=128)
     parser.add_argument('--seed', type=int, default=666)

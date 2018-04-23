@@ -94,7 +94,7 @@ def main():
     parser.add_argument('--iter-size', type=int, default=1)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--wd', type=float, default=1e-5)
+    parser.add_argument('--wd', type=float, default=1e-4)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
     parser.add_argument('--num-channel', type=int, default=128)
     parser.add_argument('--seed', type=int, default=666)
