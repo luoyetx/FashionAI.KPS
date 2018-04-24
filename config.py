@@ -62,6 +62,10 @@ cfg.BACKBONE_v4 = {
     'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage2_activation3', ['conv0']),
 }
 
+cfg.BACKBONE_Det = {
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage3_activation5', ['conv0']),
+}
+
 cfg.EVAL_NORMAL_IDX = {
     'blouse': (5, 6),
     'skirt': (15, 16),

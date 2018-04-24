@@ -6,8 +6,6 @@ import cv2
 import mxnet as mx
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
-import matplotlib
-matplotlib.use('Agg')
 import seaborn as sns
 
 from config import cfg
@@ -22,7 +20,7 @@ def process_cv_img(img):
 
 def reverse_to_cv_img(data):
     img = ((data * cfg.PIXEL_STD + cfg.PIXEL_MEAN) * 255).astype('uint8')
-    img = img.transpose((1, 2, 0))[:, :, ::-1]
+    img = img.transpose((1, 2, 0))[:, :, ::-1].copy()
     return img
 
 
@@ -91,6 +89,13 @@ def draw_paf(im, paf):
     paf = np.sqrt(np.square(paf[:, 0]) + np.square(paf[:, 1]))
     paf = paf.max(axis=0)
     return draw_heatmap(im, paf)
+
+
+def draw_box(im, box):
+    im = im.copy()
+    x1, y1, x2, y2 = [int(_) for _ in box[:4]]
+    cv2.rectangle(im, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    return im
 
 
 def get_logger(name=None):

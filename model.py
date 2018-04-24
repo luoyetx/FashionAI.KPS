@@ -355,6 +355,44 @@ class MaskPoseNet(gl.HybridBlock):
         return mask, heatmap
 
 
+##### detection model
+
+class DetNet(gl.HybridBlock):
+
+    def __init__(self, num_anchor):
+        super(DetNet, self).__init__()
+        num_category = 5
+        with self.name_scope():
+            self.backbone = None
+            self.rpn = nn.Conv2D(256, kernel_size=3, padding=1, activation='relu')
+            self.rpn_cls = nn.Conv2D(2*num_anchor*num_category, kernel_size=1)
+            self.rpn_reg = nn.Conv2D(4*num_anchor*num_category, kernel_size=1)
+
+    def hybrid_forward(self, F, x):
+        feat = self.backbone(x)  # pylint: disable=not-callable
+        feat = self.rpn(feat)
+        anchor_cls = self.rpn_cls(feat)
+        anchor_reg = self.rpn_reg(feat)
+        return anchor_cls, anchor_reg
+
+    def init_backbone(self, creator, featname, fixed, pretrained=True):
+        install_backbone(self, creator, [featname], fixed, pretrained)
+
+    def predict(self, img, ctx, anchor_proposal):
+        data = process_cv_img(img)
+        data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
+        anchor_cls, anchor_reg = self(batch)
+        n, c, h, w = anchor_cls.shape
+        anchor_cls = nd.reshape(nd.transpose(anchor_cls, (0, 2, 3, 1)), (-1, 2))
+        anchor_score = nd.softmax(anchor_cls, axis=-1)
+        anchor_score = nd.transpose(nd.reshape(anchor_score, (n, h, w, c)), (0, 3, 1, 2))
+        dets = anchor_proposal.proposal(anchor_score, anchor_reg)
+        return dets
+
+
+##### Utils
+
 def parse_from_name_v2(name):
     # name = /path/to/V2.default-vgg16-S5-C64-BS16-adam-0100.params
     name = os.path.basename(name)

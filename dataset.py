@@ -11,7 +11,7 @@ from imgaug import augmenters as iaa
 
 from config import cfg
 from utils import process_cv_img, reverse_to_cv_img, crop_patch
-from utils import draw_heatmap, draw_kps, draw_paf
+from utils import draw_heatmap, draw_kps, draw_paf, draw_box
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
@@ -245,6 +245,45 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         return len(self.img_lst)
 
 
+class FashionAIDetDataSet(gl.data.Dataset):
+
+    def __init__(self, df, is_train=True):
+        self.img_dir = os.path.join(cfg.DATA_DIR, 'train')
+        self.is_train = is_train
+        # img path
+        self.img_lst = df['image_id'].tolist()
+        self.category = df['image_category'].tolist()
+        # kps, (x, y, v) v -> (not exists -1, occur 0, normal 1)
+        cols = df.columns[2:]
+        kps = []
+        for i in range(cfg.NUM_LANDMARK):
+            for j in range(3):
+                kps.append(df[cols[i]].apply(lambda x: int(x.split('_')[j])).as_matrix())
+        kps = np.vstack(kps).T.reshape((len(self.img_lst), -1, 3)).astype(np.float)
+        self.kps = kps
+
+    def __getitem__(self, idx):
+        # meta
+        img_path = os.path.join(self.img_dir, self.img_lst[idx])
+        img = cv2.imread(img_path)
+        category = self.category[idx]
+        kps = self.kps[idx].copy()
+        # transform
+        img, kps = transform(img, kps, self.is_train)
+        # preprocess
+        height, width = img.shape[:2]
+        img = process_cv_img(img)
+        self.cur_kps = kps  # for debug and show
+        # get label
+        xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0.1)
+        cate_idx = cfg.CATEGORY.index(category)
+        label = np.array([xmin, ymin, xmax, ymax, cate_idx], dtype='float32')
+        return img, label
+
+    def __len__(self):
+        return len(self.img_lst)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', type=int, default=2)
@@ -255,7 +294,22 @@ def main():
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
     dataset = FashionAIKPSDataSet(df, version=version, is_train=args.type == 'train')
+    detset = FashionAIDetDataSet(df, is_train=args.type == 'train')
     print('DataSet Size', len(dataset))
+
+    for idx, pack in enumerate(detset):
+        data, label = pack
+        img = reverse_to_cv_img(data)
+        kps = detset.cur_kps
+        category = detset.category[idx]
+
+        dr1 = draw_kps(img, kps)
+        dr1 = draw_box(dr1, label)
+        cv2.imshow('im', dr1)
+        key = cv2.waitKey(0)
+        if key == 27:
+            break
+
     for idx, pack in enumerate(dataset):
         if version == 2:
             data, heatmap, paf, mask_heatmap, mask_paf = pack
