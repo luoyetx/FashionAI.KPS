@@ -357,6 +357,24 @@ class MaskPoseNet(gl.HybridBlock):
 
 ##### detection model
 
+class GConv(gl.HybridBlock):
+
+    def __init__(self, channels, groups):
+        super(GConv, self).__init__()
+        self.groups = groups
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            for _ in range(groups):
+                self.body.add(nn.Conv2D(channels, kernel_size=3, padding=1, activation='relu'))
+
+    def hybrid_forward(self, F, x):
+        feat = []
+        for i in range(self.groups):
+            feat.append(self.body[i](x))
+        feat = F.concat(*feat)
+        return feat
+
+
 class DetNet(gl.HybridBlock):
 
     def __init__(self, num_anchor):
@@ -364,9 +382,13 @@ class DetNet(gl.HybridBlock):
         num_category = 5
         with self.name_scope():
             self.backbone = None
-            self.rpn = nn.Conv2D(256, kernel_size=3, padding=1, activation='relu')
-            self.rpn_cls = nn.Conv2D(2*num_anchor*num_category, kernel_size=1)
-            self.rpn_reg = nn.Conv2D(4*num_anchor*num_category, kernel_size=1)
+            self.rpn = nn.HybridSequential()
+            self.rpn.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
+            self.rpn.add(GConv(64, num_category))
+            # rpn_cls: N, C x A x 2, H, W
+            # rpn_reg: N, C X A x 4, H, W
+            self.rpn_cls = nn.Conv2D(2*num_anchor*num_category, kernel_size=1, groups=num_category)
+            self.rpn_reg = nn.Conv2D(4*num_anchor*num_category, kernel_size=1, groups=num_category)
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
@@ -383,11 +405,7 @@ class DetNet(gl.HybridBlock):
         data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
         anchor_cls, anchor_reg = self(batch)
-        n, c, h, w = anchor_cls.shape
-        anchor_cls = nd.reshape(nd.transpose(anchor_cls, (0, 2, 3, 1)), (-1, 2))
-        anchor_score = nd.softmax(anchor_cls, axis=-1)
-        anchor_score = nd.transpose(nd.reshape(anchor_score, (n, h, w, c)), (0, 3, 1, 2))
-        dets = anchor_proposal.proposal(anchor_score, anchor_reg)
+        dets = anchor_proposal.proposal(anchor_cls, anchor_reg)
         return dets
 
 

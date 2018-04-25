@@ -43,6 +43,11 @@ cfg.SCALE_MIN_RATE = 0.6
 cfg.SCALE_MAX_RATE = 1.2
 cfg.CROP_CENTER_OFFSET_MAX = 40
 
+cfg.FEAT_STRIDE = 16
+#cfg.DET_SCALES = [2, 4, 8, 16]
+cfg.DET_SCALES = [5, 10, 20]
+cfg.DET_RATIOS = [1, 0.5, 2]
+
 
 cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB
 cfg.PIXEL_STD = [0.229, 0.224, 0.225]

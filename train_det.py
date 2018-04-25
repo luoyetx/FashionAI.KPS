@@ -35,7 +35,7 @@ class RpnClsLoss(gl.loss.Loss):
         pred = F.log_softmax(pred, self._axis)
         loss = -F.pick(pred, label, axis=self._axis, keepdims=True)
         loss = gl.loss._apply_weighting(F, loss, self._weight, sample_weight)
-        return F.sum(loss)
+        return F.sum(loss) / 256
 
 class RpnRegLoss(gl.loss.Loss):
 
@@ -43,8 +43,8 @@ class RpnRegLoss(gl.loss.Loss):
         super(RpnRegLoss, self).__init__(None, batch_axis, **kwargs)
 
     def hybrid_forward(self, F, output, label, mask):
-        loss = F.smooth_l1((output - label) * mask, scalar=1.0)
-        return F.sum(loss, self._batch_axis, exclude=True)
+        loss = F.smooth_l1((output - label) * mask, scalar=3)
+        return F.sum(loss)
 
 
 def forward_backward(net, anchor_proposal, criterion_cls, criterion_reg, ctx, data, rois, is_train=True):
@@ -65,9 +65,9 @@ def forward_backward(net, anchor_proposal, criterion_cls, criterion_reg, ctx, da
         # parallel stops here
         batch_label, batch_label_weight, batch_bbox_targets, batch_bbox_weights = anchor_proposal.target(rpn_cls_, rois_, im_info)
         # loss cls
-        loss_cls = criterion_cls(rpn_cls_, batch_label, batch_label_weight)
+        loss_cls = criterion_cls(rpn_cls_, batch_label, batch_label_weight) / data_.shape[0]
         # loss reg
-        loss_reg = criterion_reg(rpn_reg_, batch_bbox_targets, batch_bbox_weights)
+        loss_reg = criterion_reg(rpn_reg_, batch_bbox_targets, batch_bbox_weights) / data_.shape[0]
 
         loss = [loss_cls, loss_reg]
         # backward
@@ -97,7 +97,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--iter-size', type=int, default=1)
     parser.add_argument('--freq', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--wd', type=float, default=1e-4)
     parser.add_argument('--optim', type=str, default='sgd', choices=['sgd', 'adam'])
     parser.add_argument('--seed', type=int, default=666)
@@ -139,9 +139,10 @@ def main():
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
     # model
-    scales = [5, 10, 20]
-    ratios = [1, 0.5, 2]
-    anchor_proposal = AnchorProposal(scales, ratios, 16)
+    feat_stride = cfg.FEAT_STRIDE
+    scales = cfg.DET_SCALES
+    ratios = cfg.DET_RATIOS
+    anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
     net = DetNet(anchor_proposal.num_anchors)
     creator, featname, fixed = cfg.BACKBONE_Det[backbone]
     net.init_backbone(creator, featname, fixed, pretrained=True)
@@ -178,7 +179,7 @@ def main():
             # [(l1, l2, ...), (l1, l2, ...)]
             net.collect_params().zero_grad()
             losses = forward_backward(net, anchor_proposal, criterion_cls, criterion_reg, ctx, data, rois, is_train=True)
-            trainer.step(batch_size)
+            trainer.step(1)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):

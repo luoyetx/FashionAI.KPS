@@ -20,7 +20,7 @@ def process_cv_img(img):
 
 def reverse_to_cv_img(data):
     img = ((data * cfg.PIXEL_STD + cfg.PIXEL_MEAN) * 255).astype('uint8')
-    img = img.transpose((1, 2, 0))[:, :, ::-1].copy()
+    img = img.transpose((1, 2, 0))[:, :, ::-1]
     return img
 
 
@@ -95,6 +95,21 @@ def draw_box(im, box):
     im = im.copy()
     x1, y1, x2, y2 = [int(_) for _ in box[:4]]
     cv2.rectangle(im, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    return im
+
+
+def draw_det(im, det):
+    im = im.copy()
+    num_category = len(cfg.CATEGORY)
+    palette = np.array(sns.color_palette("hls", num_category))
+    palette = (palette * 255).astype('uint8')[:, ::-1].tolist()
+    for i in range(num_category):
+        category = cfg.CATEGORY[i]
+        color = palette[i]
+        for proposal, score in zip(*det[i]):
+            x1, y1, x2, y2 = [int(_) for _ in proposal]
+            cv2.rectangle(im, (x1, y1), (x2, y2), color, 1)
+            cv2.putText(im, '%s_%0.2f' % (category, score), (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
     return im
 
 
