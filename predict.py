@@ -15,7 +15,7 @@ from utils import draw_heatmap, draw_paf, draw_kps, get_logger
 from detect_kps import detect_kps_v1, detect_kps_v3
 
 
-file_pattern = './result/tmp_result_%d.csv'
+file_pattern = './result/tmp_%s_result_%d.csv'
 
 
 def work_func(df, idx, args):
@@ -33,7 +33,7 @@ def work_func(df, idx, args):
     net.hybridize()
     # data
     image_ids = df['image_id'].tolist()
-    image_paths = [os.path.join(data_dir, 'test-b', img_id) for img_id in image_ids]
+    image_paths = [os.path.join(data_dir, img_id) for img_id in image_ids]
     image_categories = df['image_category'].tolist()
     # run
     result = []
@@ -73,7 +73,7 @@ def work_func(df, idx, args):
         if i % 100 == 0:
             logger.info('Worker %d process %d samples', idx, i + 1)
     # save
-    fn = file_pattern % idx
+    fn = file_pattern % (args.type, idx)
     with open(fn, 'w') as fout:
         header = 'image_id,image_category,neckline_left,neckline_right,center_front,shoulder_left,shoulder_right,armpit_left,armpit_right,waistline_left,waistline_right,cuff_left_in,cuff_left_out,cuff_right_in,cuff_right_out,top_hem_left,top_hem_right,waistband_left,waistband_right,hemline_left,hemline_right,crotch,bottom_left_in,bottom_left_out,bottom_right_in,bottom_right_out\n'
         fout.write(header)
@@ -95,11 +95,16 @@ def main():
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--multi-scale', action='store_true')
     parser.add_argument('--num-worker', type=int, default=1)
+    parser.add_argument('--type', type=str, default='val', choices=['val', 'test'])
     args = parser.parse_args()
     print(args)
     # data
-    data_dir = cfg.DATA_DIR
-    df = pd.read_csv(os.path.join(data_dir, 'test-b/test.csv'))
+    if args.type == 'val':
+        data_dir = cfg.DATA_DIR
+        df = pd.read_csv(os.path.join(data_dir, 'val.csv'))
+    else:
+        data_dir = os.path.join(cfg.DATA_DIR, 'r2-test-a')
+        df = pd.read_csv(os.path.join(data_dir, 'test.csv'))
     #df = df.sample(frac=1)
     num_worker = args.num_worker
     num_sample = len(df) // num_worker + 1
@@ -111,8 +116,8 @@ def main():
     for worker in workers:
         worker.join()
     # merge
-    result = pd.concat([pd.read_csv(file_pattern % i) for i in range(num_worker)])
-    result.to_csv('./result/result.csv', index=False)
+    result = pd.concat([pd.read_csv(file_pattern % (args.type, i)) for i in range(num_worker)])
+    result.to_csv('./result/%s_result.csv' % args.type, index=False)
 
 
 if __name__ == '__main__':

@@ -5,7 +5,6 @@ from mxnet import gluon as gl
 cfg = EasyDict()
 
 cfg.DATA_DIR = './data'
-cfg.TRAIN_RATE = 0.9
 
 cfg.CATEGORY = ['blouse', 'skirt', 'outwear', 'dress', 'trousers']
 cfg.NUM_LANDMARK = 24
