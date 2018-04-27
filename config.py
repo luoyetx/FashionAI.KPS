@@ -43,8 +43,8 @@ cfg.SCALE_MAX_RATE = 1.2
 cfg.CROP_CENTER_OFFSET_MAX = 40
 
 cfg.FEAT_STRIDE = 16
-#cfg.DET_SCALES = [2, 4, 8, 16]
-cfg.DET_SCALES = [5, 10, 20]
+cfg.DET_SCALES = [2, 4, 8, 16]
+#cfg.DET_SCALES = [5, 10, 20]
 cfg.DET_RATIOS = [1, 0.5, 2]
 
 

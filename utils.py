@@ -98,12 +98,14 @@ def draw_box(im, box):
     return im
 
 
-def draw_det(im, det):
+def draw_det(im, det, draw_cate=None):
     im = im.copy()
     num_category = len(cfg.CATEGORY)
     palette = np.array(sns.color_palette("hls", num_category))
     palette = (palette * 255).astype('uint8')[:, ::-1].tolist()
     for i in range(num_category):
+        if draw_cate and cfg.CATEGORY[i] != draw_cate:
+            continue
         category = cfg.CATEGORY[i]
         color = palette[i]
         for proposal, score in zip(*det[i]):

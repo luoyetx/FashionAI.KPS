@@ -152,7 +152,7 @@ def main():
     else:
         trainer = gl.trainer.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'wd': wd, 'lr_scheduler': lr_scheduler})
     # logger
-    log_dir = './log/%s'%base_name
+    log_dir = './log-v2/%s'%base_name
     if os.path.exists(log_dir) and start_epoch == 1:
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)

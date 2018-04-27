@@ -203,7 +203,7 @@ def get_label_v4(height, width, category, kps):
 class FashionAIKPSDataSet(gl.data.Dataset):
 
     def __init__(self, df, version=2, is_train=True):
-        self.img_dir = os.path.join(cfg.DATA_DIR, 'train')
+        self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
         self.version = version
         # img path
@@ -248,7 +248,7 @@ class FashionAIKPSDataSet(gl.data.Dataset):
 class FashionAIDetDataSet(gl.data.Dataset):
 
     def __init__(self, df, is_train=True):
-        self.img_dir = os.path.join(cfg.DATA_DIR, 'train')
+        self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
         # img path
         self.img_lst = df['image_id'].tolist()
@@ -275,7 +275,7 @@ class FashionAIDetDataSet(gl.data.Dataset):
         img = process_cv_img(img)
         self.cur_kps = kps  # for debug and show
         # get label
-        xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0.05)
+        xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0.1)
         cate_idx = cfg.CATEGORY.index(category)
         label = np.array([xmin, ymin, xmax, ymax, cate_idx], dtype='float32')
         return img, label
@@ -294,22 +294,7 @@ def main():
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
     dataset = FashionAIKPSDataSet(df, version=version, is_train=args.type == 'train')
-    detset = FashionAIDetDataSet(df, is_train=args.type == 'train')
     print('DataSet Size', len(dataset))
-
-    for idx, pack in enumerate(detset):
-        data, label = pack
-        img = reverse_to_cv_img(data)
-        kps = detset.cur_kps
-        category = detset.category[idx]
-
-        dr1 = draw_kps(img, kps)
-        dr1 = draw_box(dr1, label)
-        cv2.imshow('im', dr1)
-        key = cv2.waitKey(0)
-        if key == 27:
-            break
-
     for idx, pack in enumerate(dataset):
         if version == 2:
             data, heatmap, paf, mask_heatmap, mask_paf = pack

@@ -202,14 +202,9 @@ class AnchorProposal(object):
         K = shifts.shape[0]
         anchors = (self.anchors.reshape((1, A, 4)) + shifts.reshape((1, K, 4)).transpose((1, 0, 2)))
         anchors = anchors.reshape((K * A, 4))
-        total_anchors = int(K * A)
 
-        # N, num_category * num_anchor * h * w, 4
-        bbox_deltas = rpn_reg.transpose((0, 2, 3, 1)).reshape((n, num_category * total_anchors, 4))
-        # N, num_category * num_anchor * h * w
-        select = np.arange(1, num_category*A*2, 2)
-        scores = rpn_score.transpose((0, 2, 3, 1))[:, :, :, select]
-        scores = scores.reshape((n, num_category * total_anchors))
+        # rpn_cls: N, C x A x 2, H, W
+        # rpn_reg: N, C X A x 4, H, W
 
         # shape: N, num_category, (proposals, scores)
         dets = []
@@ -217,13 +212,19 @@ class AnchorProposal(object):
             res = []
             for j in range(num_category):
                 # get proposals
-                offset = j * total_anchors
-                proposals = bbox_transform_inv(anchors, bbox_deltas[i, offset: offset + total_anchors])
+                # deltas: H x W x A, 4
+                # scores: H x W x A
+                offset = j * A*4
+                bbox_deltas = rpn_reg[i, offset: offset+A*4].transpose((1, 2, 0)).reshape((-1, 4))
+                proposals = bbox_transform_inv(anchors, bbox_deltas)
                 proposals = clip_boxes(proposals, im_info)
+                offset = j * A*2
+                category_scores = rpn_score[i, offset+1:offset+A*2:2].transpose((1, 2, 0)).flatten()
+                # filter bbox
                 keep = _filter_boxes(proposals, self.min_size)
                 proposals = proposals[keep]
-                # get scores
-                category_scores = scores[i, offset: offset + total_anchors]
+                category_scores = category_scores[keep]
+                # pre nms
                 order = category_scores.ravel().argsort()[::-1]
                 order = order[:self.num_det_per_category]
                 proposals = proposals[order]
@@ -292,17 +293,26 @@ def _filter_boxes(boxes, min_size):
 
 def main():
     import pandas as pd
+    from model import DetNet
     from dataset import FashionAIDetDataSet
     from utils import reverse_to_cv_img, draw_box, draw_kps, draw_det
 
     df = pd.read_csv('./data/val.csv')
-    dataset = FashionAIDetDataSet(df, is_train=True)
+    dataset = FashionAIDetDataSet(df, is_train=False)
     feat_stride = cfg.FEAT_STRIDE
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
     anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
     A = anchor_proposal.num_anchors
     print(anchor_proposal.anchors)
+
+    ctx = mx.cpu()
+    net = DetNet(A)
+    creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
+    net.init_backbone(creator, featname, fixed, pretrained=True)
+    net.load_params('./output/Det.default-resnet50-BS16-sgd-0003.params')
+    # net.initialize(mx.init.Normal(), ctx=ctx)
+    # net.collect_params().reset_ctx(ctx)
 
     for idx, (data, gt_box) in enumerate(dataset):
         img = reverse_to_cv_img(data)
@@ -311,9 +321,8 @@ def main():
         category = dataset.category[idx]
         cate_idx = cfg.CATEGORY.index(category)
         landmark_idx = cfg.LANDMARK_IDX[category]
-        print(kps[landmark_idx])
-        rpn_cls = nd.random.normal(shape=(1, 2*5*A, 23, 23))
-        rpn_reg = nd.zeros(shape=(1, 4*5*A, 23, 23))
+
+        rpn_cls, rpn_reg = net(nd.array(data.reshape((1, 3, 368, 368))))
         gt_box = nd.array(gt_box.reshape((1, 5)))
         batch_labels, batch_labels_weight, batch_bbox_targets, batch_bbox_weights = anchor_proposal.target(rpn_cls, gt_box)
 
@@ -335,6 +344,16 @@ def main():
                 assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 0) == (base * A - 256)
                 assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 1) == 256
                 assert nd.sum(batch_bbox_weights[0, offset_reg:offset_reg+A*4] != 0) <= 256 * 4
+                # score
+                n, c, height, width = rpn_cls.shape
+                rpn_score = nd.reshape(nd.transpose(rpn_cls, (0, 2, 3, 1)), (-1, 2))
+                rpn_score = nd.softmax(rpn_score, axis=-1)
+                rpn_score = nd.transpose(nd.reshape(rpn_score, (n, height, width, c)), (0, 3, 1, 2))
+                rpn_score = rpn_score[0, cate_idx*A*2+1:cate_idx*A*2+A*2:2].transpose((1, 2, 0)).asnumpy().flatten()
+                # bbox reg
+                bbox_targets = batch_bbox_targets[0, cate_idx*A*4:cate_idx*A*4+A*4].transpose((1, 2, 0)).reshape((-1, 4)).asnumpy()
+                bbox_preds = rpn_reg[0, cate_idx*A*4:cate_idx*A*4+A*4].transpose((1, 2, 0)).reshape((-1, 4)).asnumpy()
+                # select
                 select = batch_labels_weight[0, offset_cls: offset_cls+A] == 1
                 select = select.asnumpy().astype('bool')
                 select = select.transpose((1, 2, 0)).flatten()
@@ -344,25 +363,47 @@ def main():
                 labels = labels.asnumpy()
                 labels = labels.transpose((1, 2, 0)).flatten()
                 labels = labels[select]
+                rpn_score = rpn_score[select]
+                bbox_targets = bbox_targets[select]
+                bbox_preds = bbox_preds[select]
                 # draw pos
                 keep = labels == 1
                 anchors_pos = anchors[keep]
+                rpn_score_pos = rpn_score[keep]
+                bbox_targets = bbox_targets[keep]
+                bbox_preds = bbox_preds[keep]
                 print('pos num:', len(anchors_pos))
-                for anchor in anchors_pos:
+                for anchor, score, bbox_target, bbox_pred in zip(anchors_pos, rpn_score_pos, bbox_targets, bbox_preds):
                     x1, y1, x2, y2 = [int(_) for _ in anchor]
                     cv2.rectangle(dr2, (x1, y1), (x2, y2), (255, 0, 0), 1)
+                    cv2.putText(dr2, '%s_%0.2f' % (category, score), (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
+                    # bbox transform
+                    print('gt box', gt_box)
+                    print(gt_box)
+                    print('target')
+                    print(bbox_target)
+                    print(bbox_transform_inv(anchor.reshape((1,4)), bbox_target.reshape((1, 4))))
+                    print('pred')
+                    print(bbox_pred)
+                    pred_box = bbox_transform_inv(anchor.reshape((1,4)), bbox_pred.reshape((1, 4)))[0]
+                    print(pred_box)
+                    x1, y1, x2, y2 = [int(_) for _ in pred_box]
+                    cv2.rectangle(dr2, (x1, y1), (x2, y2), (0, 0, 255), 1)
                 # draw neg
                 keep = labels == 0
                 anchors_neg = anchors[keep]
+                rpn_score_neg = rpn_score[keep]
                 print('neg num:', len(anchors_neg))
                 keep = np.random.choice(np.arange(len(anchors_neg)), size=len(anchors_pos), replace=False)
                 anchors_neg = anchors_neg[keep]
-                for anchor in anchors_neg:
+                rpn_score_neg = rpn_score_neg[keep]
+                for anchor, score in zip(anchors_neg, rpn_score_neg):
                     x1, y1, x2, y2 = [int(_) for _ in anchor]
                     cv2.rectangle(dr3, (x1, y1), (x2, y2), (0, 0, 255), 1)
+                    cv2.putText(dr3, '%s_%0.2f' % (category, 1 - score), (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
 
         dets = anchor_proposal.proposal(rpn_cls, rpn_reg)
-        dr4 = draw_det(img, dets[0])
+        dr4 = draw_det(img, dets[0], category)
 
         cv2.imshow('img', dr1)
         cv2.imshow('rpn-pos', dr2)
