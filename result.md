@@ -1,3 +1,5 @@
+# season 1
+
 ### test-a
 
 v1
@@ -70,17 +72,21 @@ print(c)
 
 sclae exploration
 
-v2.18 err on val 0.045048, scales to [440, 368, 224]
-v2.19 err on val 0.045607, scales to [440, 368, 224]
-v2.20 err on val 0.046677, scales to [440, 368, 224]
-v2.21 err on val 0.045841, scales to [440, 368, 224]
+- v2.18 err on val 0.045048, scales to [440, 368, 224]
+- v2.19 err on val 0.045607, scales to [440, 368, 224]
+- v2.20 err on val 0.046677, scales to [440, 368, 224]
+- v2.21 err on val 0.045841, scales to [440, 368, 224]
 
-v2.21 err on val 0.060549, scale 512
-v2.21 err on val 0.052712, scale 440
-v2.21 err on val 0.048561, scale 400
-v2.21 err on val 0.048460, scale 368
-v2.21 err on val 0.051302, scale 296
-v2.21 err on val 0.055201, scale 224
+- v2.21 err on val 0.060549, scale 512
+- v2.21 err on val 0.052712, scale 440
+- v2.21 err on val 0.048561, scale 400
+- v2.21 err on val 0.048460, scale 368
+- v2.21 err on val 0.051302, scale 296
+- v2.21 err on val 0.055201, scale 224
 
 - v2.22 based on v2.21 scales to [440, 368, 224], err on val 0.045841, public 0.0495, missing 794
 - v2.23 based on v2.21 scales to [400, 368, 296], err on val 0.046198, public 0.0503, missing 950
+
+# season 2
+
+### test-a

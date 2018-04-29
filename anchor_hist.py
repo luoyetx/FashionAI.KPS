@@ -39,8 +39,11 @@ def main():
     plt.hist(hs, bins=100)
     plt.title('height')
     plt.figure()
-    plt.hist(ws / hs, bins=100)
-    plt.title('w/h')
+    keep = ws > 0
+    hs = hs[keep]
+    ws = ws[keep]
+    plt.hist(hs / ws, bins=100)
+    plt.title('h / w')
     plt.show()
 
 

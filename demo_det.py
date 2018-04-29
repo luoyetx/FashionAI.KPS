@@ -57,7 +57,7 @@ def main():
         assert len(dets) == 1
         dets = dets[0]
 
-        img = draw_det(img, dets)
+        img = draw_det(img, dets, category)
         cv2.imshow('dets', img)
         key = cv2.waitKey(0)
         if key == 27:

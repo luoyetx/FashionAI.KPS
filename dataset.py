@@ -34,7 +34,7 @@ def random_aug_img(img):
     return img
 
 
-def transform(img, kps, is_train=True):
+def transform(img, kps, is_train=True, rot=True):
     height, width = img.shape[:2]
     # flip
     if np.random.rand() < 0.5 and is_train:
@@ -45,7 +45,7 @@ def transform(img, kps, is_train=True):
             kps[i] = kps[j]
             kps[j] = tmp
     # rotate
-    if is_train:
+    if is_train and rot:
         angle = (np.random.random() - 0.5) * 2 * cfg.ROT_MAX
         center = (width // 2, height // 2)
         rot = cv2.getRotationMatrix2D(center, angle, 1)
@@ -269,7 +269,7 @@ class FashionAIDetDataSet(gl.data.Dataset):
         category = self.category[idx]
         kps = self.kps[idx].copy()
         # transform
-        img, kps = transform(img, kps, self.is_train)
+        img, kps = transform(img, kps, self.is_train, rot=False)
         # preprocess
         height, width = img.shape[:2]
         img = process_cv_img(img)

@@ -5,36 +5,10 @@ import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 
 from config import cfg
-from matlab_cp2tform import findSimilarity
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
 from heatmap import pickPeeks
-
-
-def predict_missing(img, kps, category):
-    # fill missing
-    h, w = img.shape[:2]
-    landmark_idx = cfg.LANDMARK_IDX[category]
-    landmark_refs = cfg.LANDMARK_REF[category]
-    keep = kps[:, 2] == 1
-    if np.sum(keep) == len(landmark_idx):
-        # no missing
-        return kps
-    missing = kps[:, 2] != 1
-    ldm = np.zeros_like(kps, dtype='float')
-    for ref in landmark_refs:
-        # similarity
-        rot = findSimilarity(ref[keep], kps[keep, :2])
-        ldm_ref = np.hstack([ref, np.ones((len(ref), 1))]).dot(rot[0])
-        ldm[landmark_idx] += ldm_ref[landmark_idx]
-    ldm = np.round(ldm / len(landmark_refs)).astype('int32')
-    kps[missing, :2] = ldm[missing, :2]
-    kps[missing, 2] = 0
-    kps_ = kps[landmark_idx].copy()
-    kps[:, :] = -1
-    kps[landmark_idx] = kps_
-    return kps
 
 
 def predict_missing_with_center(img, kps, category):

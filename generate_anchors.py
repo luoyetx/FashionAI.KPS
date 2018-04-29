@@ -4,6 +4,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ross Girshick and Sean Bell
 # --------------------------------------------------------
+from __future__ import print_function
 
 import numpy as np
 
@@ -99,7 +100,13 @@ def _scale_enum(anchor, scales):
 if __name__ == '__main__':
     import time
     t = time.time()
-    a = generate_anchors()
-    print time.time() - t
-    print a
-    from IPython import embed; embed()
+    a = generate_anchors(ratios=[0.5, 1, 2, 3])
+    print('width')
+    width = a[:, 2] - a[:, 0]
+    print(width)
+    print('height')
+    height = a[:, 3] - a[:, 1]
+    print(height)
+    print('height / width')
+    print(height / width)
+    print(a)
