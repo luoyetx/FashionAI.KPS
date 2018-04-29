@@ -14,10 +14,10 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
-from config import cfg
-from dataset import FashionAIKPSDataSet
-from model import PoseNet, CascadePoseNet, MaskPoseNet
-from utils import get_logger, Recorder
+from lib.config import cfg
+from lib.dataset import FashionAIKPSDataSet
+from lib.model import PoseNet, CascadePoseNet, MaskPoseNet
+from lib.utils import get_logger, Recorder
 
 
 class SumL2Loss(gl.loss.Loss):

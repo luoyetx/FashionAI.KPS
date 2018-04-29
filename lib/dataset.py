@@ -9,9 +9,9 @@ import pandas as pd
 import numpy as np
 from imgaug import augmenters as iaa
 
-from config import cfg
-from utils import process_cv_img, reverse_to_cv_img, crop_patch
-from utils import draw_heatmap, draw_kps, draw_paf, draw_box
+from lib.config import cfg
+from lib.utils import process_cv_img, reverse_to_cv_img, crop_patch
+from lib.utils import draw_heatmap, draw_kps, draw_paf, draw_box
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})

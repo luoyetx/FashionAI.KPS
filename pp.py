@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from config import cfg
+from lib.config import cfg
 
 
 def calc_error(kps_pred, kps_gt, category):

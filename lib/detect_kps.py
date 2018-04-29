@@ -4,11 +4,11 @@ import cv2
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 
-from config import cfg
+from lib.config import cfg
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
-from heatmap import pickPeeks
+from lib.heatmap import pickPeeks
 
 
 def predict_missing_with_center(img, kps, category):

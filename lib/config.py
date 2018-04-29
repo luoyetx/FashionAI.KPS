@@ -1,10 +1,12 @@
 from easydict import EasyDict
+import os
 import numpy as np
 from mxnet import gluon as gl
 
 cfg = EasyDict()
 
-cfg.DATA_DIR = './data'
+cfg.DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'data')
 
 cfg.CATEGORY = ['blouse', 'skirt', 'outwear', 'dress', 'trousers']
 cfg.NUM_LANDMARK = 24

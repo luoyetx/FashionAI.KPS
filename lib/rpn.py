@@ -9,15 +9,15 @@ import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
-from config import cfg
-from utils import process_cv_img
-from generate_anchors import generate_anchors
-from bbox_transform import bbox_transform, bbox_transform_inv, clip_boxes
+from lib.config import cfg
+from lib.utils import process_cv_img
+from lib.generate_anchors import generate_anchors
+from lib.bbox_transform import bbox_transform, bbox_transform_inv, clip_boxes
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
-from bbox import bbox_overlaps_cython
-from cpu_nms import cpu_nms
+from lib.bbox import bbox_overlaps_cython
+from lib.cpu_nms import cpu_nms
 
 
 class AnchorProposal(object):
@@ -310,7 +310,7 @@ def main():
     net = DetNet(A)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     net.init_backbone(creator, featname, fixed, pretrained=True)
-    net.load_params('./output/Det.default-resnet50-BS16-sgd-0003.params')
+    net.load_params('./output/Det.more.anchor-resnet50-BS32-sgd-0030.params')
     # net.initialize(mx.init.Normal(), ctx=ctx)
     # net.collect_params().reset_ctx(ctx)
 

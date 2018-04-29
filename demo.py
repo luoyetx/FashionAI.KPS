@@ -9,11 +9,11 @@ from mxnet.gluon import nn
 import numpy as np
 import pandas as pd
 
-from dataset import FashionAIKPSDataSet
-from model import load_model
-from utils import draw_heatmap, draw_paf, draw_kps, reverse_to_cv_img
-from detect_kps import detect_kps_v1, detect_kps_v3
-from config import cfg
+from lib.dataset import FashionAIKPSDataSet
+from lib.model import load_model
+from lib.utils import draw_heatmap, draw_paf, draw_kps, reverse_to_cv_img
+from lib.detect_kps import detect_kps_v1, detect_kps_v3
+from lib.config import cfg
 
 
 def main():

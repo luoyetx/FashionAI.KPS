@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from config import cfg
-from dataset import FashionAIDetDataSet
+from lib.config import cfg
+from lib.dataset import FashionAIDetDataSet
 
 
 def main():

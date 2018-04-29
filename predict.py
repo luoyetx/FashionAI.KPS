@@ -9,10 +9,10 @@ import mxnet as mx
 import numpy as np
 import pandas as pd
 
-from config import cfg
-from model import load_model, multi_scale_predict
-from utils import draw_heatmap, draw_paf, draw_kps, get_logger
-from detect_kps import detect_kps_v1, detect_kps_v3
+from lib.config import cfg
+from lib.model import load_model, multi_scale_predict
+from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger
+from lib.detect_kps import detect_kps_v1, detect_kps_v3
 
 
 file_pattern = './result/tmp_%s_result_%d.csv'

@@ -14,11 +14,11 @@ import numpy as np
 import pandas as pd
 from tensorboardX import SummaryWriter
 
-from config import cfg
-from dataset import FashionAIDetDataSet
-from model import DetNet
-from rpn import AnchorProposal
-from utils import get_logger, Recorder
+from lib.config import cfg
+from lib.dataset import FashionAIDetDataSet
+from lib.model import DetNet
+from lib.rpn import AnchorProposal
+from lib.utils import get_logger, Recorder
 
 
 class RpnClsLoss(gl.loss.Loss):

@@ -2,7 +2,7 @@ from __future__ import print_function, division
 
 import os
 import pandas as pd
-from config import cfg
+from lib.config import cfg
 
 data_dir = cfg.DATA_DIR
 # train

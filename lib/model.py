@@ -7,8 +7,8 @@ import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
-from config import cfg
-from utils import process_cv_img
+from lib.config import cfg
+from lib.utils import process_cv_img
 
 
 def freeze_bn(block):

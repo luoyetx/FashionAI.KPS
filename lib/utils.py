@@ -8,7 +8,7 @@ import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 import seaborn as sns
 
-from config import cfg
+from lib.config import cfg
 
 
 def process_cv_img(img):

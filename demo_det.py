@@ -10,12 +10,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from dataset import FashionAIDetDataSet
-from model import load_model, DetNet
-from rpn import AnchorProposal
-from utils import draw_det, reverse_to_cv_img
-from detect_kps import detect_kps_v1, detect_kps_v3
-from config import cfg
+from lib.dataset import FashionAIDetDataSet
+from lib.model import load_model, DetNet
+from lib.rpn import AnchorProposal
+from lib.utils import draw_det, reverse_to_cv_img
+from lib.detect_kps import detect_kps_v1, detect_kps_v3
+from lib.config import cfg
 
 
 def main():
