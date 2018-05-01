@@ -34,10 +34,10 @@ class AnchorProposal(object):
         self.anchor_negative_overlap = 0.3
         self.anchor_positive_overlap = 0.5
         self.anchor_fg_fraction = 0.25
-        self.anchor_per_sample = 256
+        self.anchor_per_sample = 128
         self.hard_mining = True
         # test
-        self.num_det_per_category = 300
+        self.num_det_per_category = 64
         self.min_size = 0
         self.nms_th = 0.3
         self.score_th = 0.6
@@ -118,6 +118,8 @@ class AnchorProposal(object):
                     pos_scores = pos_scores[fg_inds]
                     order_pos_scores = pos_scores.ravel().argsort()
                     ohem_sampled_fgs = fg_inds[order_pos_scores[:num_fg]]
+                    # print('pos neg scores')
+                    # print(pos_scores[order_pos_scores[:num_fg]])
                     labels[fg_inds] = -1
                     labels[ohem_sampled_fgs] = 1
                 else:
@@ -137,6 +139,8 @@ class AnchorProposal(object):
                     neg_scores = neg_scores[bg_inds]
                     order_neg_scores = neg_scores.ravel().argsort()
                     ohem_sampled_bgs = bg_inds[order_neg_scores[:num_bg]]
+                    # print('hard neg scores')
+                    # print(neg_scores[order_neg_scores[:num_bg]])
                     labels[bg_inds] = -1
                     labels[ohem_sampled_bgs] = 0
                 else:
@@ -341,9 +345,10 @@ def main():
                 assert nd.sum(batch_bbox_targets[0, offset_reg: offset_reg+A*4] == 0) == base * A * 4
                 assert nd.sum(batch_bbox_weights[0, offset_reg: offset_reg+A*4] == 0) == base * A * 4
             else:
-                assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 0) == (base * A - 256)
-                assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 1) == 256
-                assert nd.sum(batch_bbox_weights[0, offset_reg:offset_reg+A*4] != 0) <= 256 * 4
+                anchor_per_sample = anchor_proposal.anchor_per_sample
+                assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 0) == (base * A - anchor_per_sample)
+                assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 1) == anchor_per_sample
+                assert nd.sum(batch_bbox_weights[0, offset_reg:offset_reg+A*4] != 0) <= anchor_per_sample * 4
                 # score
                 n, c, height, width = rpn_cls.shape
                 rpn_score = nd.reshape(nd.transpose(rpn_cls, (0, 2, 3, 1)), (-1, 2))
@@ -378,15 +383,16 @@ def main():
                     cv2.rectangle(dr2, (x1, y1), (x2, y2), (255, 0, 0), 1)
                     cv2.putText(dr2, '%s_%0.2f' % (category, score), (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
                     # bbox transform
-                    print('gt box', gt_box)
-                    print(gt_box)
-                    print('target')
-                    print(bbox_target)
-                    print(bbox_transform_inv(anchor.reshape((1,4)), bbox_target.reshape((1, 4))))
-                    print('pred')
-                    print(bbox_pred)
+                    # print('gt box', gt_box)
+                    # print(gt_box)
+                    # print('target')
+                    # print(bbox_target)
+                    # print(bbox_transform_inv(anchor.reshape((1,4)), bbox_target.reshape((1, 4))))
+                    # print('pred')
+                    # print(bbox_pred)
+                    # pred_box = bbox_transform_inv(anchor.reshape((1,4)), bbox_pred.reshape((1, 4)))[0]
+                    # print(pred_box)
                     pred_box = bbox_transform_inv(anchor.reshape((1,4)), bbox_pred.reshape((1, 4)))[0]
-                    print(pred_box)
                     x1, y1, x2, y2 = [int(_) for _ in pred_box]
                     cv2.rectangle(dr2, (x1, y1), (x2, y2), (0, 0, 255), 1)
                 # draw neg

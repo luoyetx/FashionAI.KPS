@@ -90,3 +90,31 @@ sclae exploration
 # season 2
 
 ### test-a
+
+multi-scale [440, 368, 224], flip
+
+- v2.24 V2.default-vgg19-S3-C64-BS32-sgd-0100.params, test err 4.774
+
+```
+Average Error for blouse: 0.042783
+Average Error for skirt: 0.039472
+Average Error for outwear: 0.044685
+Average Error for dress: 0.043861
+Average Error for trousers: 0.045463
+Total Average Error 0.043149
+```
+
+public
+
+- v2.25 V2.default-vgg19-S5-C64-BS32-sgd-0100.params, test err 4.767
+
+```
+Average Error for blouse: 0.042213
+Average Error for skirt: 0.037379
+Average Error for outwear: 0.044893
+Average Error for dress: 0.044200
+Average Error for trousers: 0.044576
+Total Average Error 0.042481
+```
+
+public

@@ -98,6 +98,8 @@ class PoseNet(gl.HybridBlock):
             out2 = self.limb_cpm[i](out)
             outs.append([out1, out2])
             out = F.concat(feat, out1, out2)
+            if i == 2:
+                out = F.stop_gradient(out)
         return outs
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
