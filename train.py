@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 
 from lib.config import cfg
 from lib.dataset import FashionAIKPSDataSet
-from lib.model import PoseNet, CascadePoseNet, MaskPoseNet, load_model
+from lib.model import PoseNet, CascadePoseNet, MaskPoseNet, PoseNetNoPaf, load_model
 from lib.utils import get_logger, Recorder
 
 
@@ -139,6 +139,35 @@ def forward_backward_v4(net, criterions, ctx, packet, is_train=True):
     return losses
 
 
+def forward_backward_v5(net, criterions, ctx, packet, is_train=True):
+    ht_criterion, = criterions
+    data, heatmap, paf, heatmap_mask, paf_mask = packet
+    # split to gpus
+    data = gl.utils.split_and_load(data, ctx)
+    heatmap = gl.utils.split_and_load(heatmap, ctx)
+    heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
+    # run
+    ag.set_recording(is_train)
+    ag.set_training(is_train)
+    losses = []
+    for data_, heatmap_, heatmap_mask_ in zip(data, heatmap, heatmap_mask):
+        # forward
+        out_ = net(data_)
+        losses_ = []
+        num_stages = len(out_)
+        for i in range(num_stages):
+            out_[i] = nd.elemwise_mul(out_[i], heatmap_mask_)
+            heatmap_ = nd.elemwise_mul(heatmap_, heatmap_mask_)
+            losses_.append(ht_criterion(out_[i], heatmap_))
+        losses.append(losses_)
+        # backward
+        if is_train:
+            ag.backward(losses_)
+    ag.set_recording(False)
+    ag.set_training(False)
+    return losses
+
+
 def reduce_losses(losses):
     n = len(losses)
     m = len(losses[0])
@@ -165,7 +194,7 @@ def main():
     parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
     parser.add_argument('--model-path', type=str, default='')
     parser.add_argument('--prefix', type=str, default='default', help='model description')
-    parser.add_argument('--version', type=int, default=2, choices=[2, 3, 4], help='model version')
+    parser.add_argument('--version', type=int, default=2, choices=[2, 3, 4, 5], help='model version')
     parser.add_argument('--num-stage', type=int, default=5)
     parser.add_argument('--num-channel', type=int, default=64)
     args = parser.parse_args()
@@ -194,8 +223,12 @@ def main():
         base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
     elif version == 3:
         base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
-    else:
+    elif version == 4:
         base_name = 'V4.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
+    elif version == 5:
+        base_name = 'V5.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
+    else:
+        raise RuntimeError('no such version %d'%version)
     logger = get_logger()
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
@@ -215,9 +248,14 @@ def main():
         elif version == 3:
             net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-        else:
+        elif version == 4:
             net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v4[backbone]
+        elif version == 5:
+            net = PoseNetNoPaf(num_kps=num_kps, stages=num_stage, channels=num_channel)
+            creator, featname, fixed = cfg.BACKBONE_v2[backbone]
+        else:
+            raise RuntimeError('no such version %d'%version)
         net.init_backbone(creator, featname, fixed, pretrained=True)
         net.initialize(mx.init.Normal(), ctx=ctx)
     else:
@@ -250,8 +288,12 @@ def main():
             rds.append(rd2)
     elif version == 3:
         rds = [Recorder('Global-04', freq), Recorder('Global-08', freq), Recorder('Global-16', freq), Recorder('Refine', freq)]
-    else:
+    elif version == 4:
         rds = [Recorder('mask', freq), Recorder('ht_global', freq), Recorder('ht_refine', freq)]
+    elif version == 5:
+        rds = [Recorder('h-%d' % i, freq) for i in range(num_stage)]
+    else:
+        raise RuntimeError('no such version %d'%version)
     # meta info
     global_step = 0
     # forward and backward
@@ -261,9 +303,14 @@ def main():
     elif version == 3:
         forward_backward = forward_backward_v3
         criterions = (ht_criterion,)
-    else:
+    elif version == 4:
         forward_backward = forward_backward_v4
         criterions = (ht_criterion, obj_criterion)
+    elif version == 5:
+        forward_backward = forward_backward_v5
+        criterions = (ht_criterion,)
+    else:
+        raise RuntimeError('no such version %d'%version)
     for epoch_idx in range(epoches):
         # train part
         tic = time.time()

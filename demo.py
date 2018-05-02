@@ -53,10 +53,18 @@ def main():
         img = reverse_to_cv_img(data)
         heatmap = net.predict(img, ctx)
         kps_pred = detect_kps_v3(img, heatmap, category)
-    else:
+    elif version == 4:
         data, ht, _, obj, _ = testdata[test_idx]
         img = reverse_to_cv_img(data)
         obj, heatmap = net.predict(img, ctx)
+        kps_pred = detect_kps_v3(img, out_heatmap, category)
+    elif version == 5:
+        data, heatmap, paf = testdata[test_idx][:3]
+        img = reverse_to_cv_img(data)
+        out_heatmap = net.predict(img, ctx)
+        kps_pred = detect_kps_v3(img, out_heatmap, category)
+    else:
+        raise RuntimeError('no such version %d'%version)
 
     kps_gt = testdata.cur_kps
     # render
@@ -87,7 +95,7 @@ def main():
         cv2.imshow('pred_heatmap', dr2)
         cv2.imshow('pred_kps', dr3)
         cv2.imshow('ori_kps', dr4)
-    else:
+    elif version == 4:
         cate_idx = cfg.CATEGORY.index(category)
         dr1 = draw_heatmap(img, ht.max(axis=0))
         dr2 = draw_heatmap(img, heatmap.max(axis=0))
@@ -102,6 +110,22 @@ def main():
         cv2.imshow('2', draw_heatmap(img, obj[2]))
         cv2.imshow('3', draw_heatmap(img, obj[3]))
         cv2.imshow('4', draw_heatmap(img, obj[4]))
+    elif version == 5:
+        heatmap = heatmap[-1]
+        out_htall = out_heatmap[-1]
+        out_heatmap = out_heatmap[landmark_idx].max(axis=0)
+        dr1 = draw_heatmap(img, heatmap)
+        dr3 = draw_heatmap(img, out_heatmap)
+        dr5 = draw_heatmap(img, out_htall)
+        dr6 = draw_kps(img, kps_pred)
+        dr7 = draw_kps(img, kps_gt)
+        cv2.imshow('ori_heatmap', dr1)
+        cv2.imshow('pred_heatmap', dr3)
+        cv2.imshow('pred_htall', dr5)
+        cv2.imshow('pred_kps', dr6)
+        cv2.imshow('ori_kps', dr7)
+    else:
+        raise RuntimeError('no such version %d'%version)
     cv2.waitKey(0)
 
 

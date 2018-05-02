@@ -206,6 +206,8 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
         self.version = version
+        if version == 5:
+            self.version = 2
         # img path
         self.img_lst = df['image_id'].tolist()
         self.category = df['image_category'].tolist()

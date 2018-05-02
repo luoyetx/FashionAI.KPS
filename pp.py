@@ -11,18 +11,18 @@ def calc_error(kps_pred, kps_gt, category):
     dist = lambda dx, dy: np.sqrt(np.square(dx) + np.square(dy))
     idx1, idx2 = cfg.EVAL_NORMAL_IDX[category]
     if kps_gt[idx1, 2] == -1 or kps_gt[idx2, 2] == -1:
-        return -1
+        return 0, False
     norm = dist(kps_gt[idx1, 0] - kps_gt[idx2, 0], kps_gt[idx1, 1] - kps_gt[idx2, 1])
     keep = kps_gt[:, 2] == 1
     kps_gt = kps_gt[keep]
     kps_pred = kps_pred[keep]
-    if len(kps_gt) == 0:
+    if keep.sum() == 0:
         # all occ
-        return -1
+        return 0, False
     error = dist(kps_pred[:, 0] - kps_gt[:, 0], kps_pred[:, 1] - kps_gt[:, 1])
     error[kps_pred[:, 2] == -1] = norm  # fill missing with norm, so error = 1
-    error = error.mean() / norm
-    return error
+    error = error / norm
+    return error, True
 
 
 def read_csv(path):
@@ -54,11 +54,11 @@ def main():
     result = [[] for i in range(num_category)]
     for gt, pred, cate in zip(kps_gt, kps_pred, category):
         cate_idx = cfg.CATEGORY.index(cate)
-        err = calc_error(pred, gt, cate)
-        if err != -1:
+        err, state = calc_error(pred, gt, cate)
+        if state:
             result[cate_idx].append(err)
 
-    result = [np.array(_) for _ in result]
+    result = [np.hstack(_) for _ in result]
     for i in range(num_category):
         category = cfg.CATEGORY[i]
         err = result[i].mean()

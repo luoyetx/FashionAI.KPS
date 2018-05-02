@@ -21,7 +21,7 @@ file_pattern = './result/tmp_%s_result_%d.csv'
 def work_func(df, idx, args):
     # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
-    data_dir = cfg.DATA_DIR
+    data_dir = args.data_dir
     model_path = args.model
     version = args.version
     show = args.show
@@ -43,9 +43,16 @@ def work_func(df, idx, args):
         if version == 2:
             heatmap, paf = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v1(img, heatmap, paf, category)
-        else:
+        elif version == 3:
             heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
+        elif version == 4:
+            pass
+        elif version == 5:
+            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
+            kps_pred = detect_kps_v3(img, heatmap, category)
+        else:
+            raise RuntimeError('no such version %d'%version)
         result.append(kps_pred)
         # show
         if show:
@@ -61,12 +68,22 @@ def work_func(df, idx, args):
                 cv2.imshow('paf', dr2)
                 cv2.imshow('kps_pred', dr3)
                 cv2.imshow('htall', dr4)
-            else:
+            elif version == 3:
                 heatmap = heatmap[landmark_idx].max(axis=0)
                 dr1 = draw_heatmap(img, heatmap)
                 dr2 = draw_kps(img, kps_pred)
                 cv2.imshow('heatmap', dr1)
                 cv2.imshow('kps_pred', dr2)
+            elif version == 4:
+                pass
+            elif version == 5:
+                heatmap = heatmap[landmark_idx].max(axis=0)
+                dr1 = draw_heatmap(img, heatmap)
+                dr2 = draw_kps(img, kps_pred)
+                cv2.imshow('heatmap', dr1)
+                cv2.imshow('kps_pred', dr2)
+            else:
+                raise RuntimeError('no such version %d'%version)
             key = cv2.waitKey(0)
             if key == 27:
                 break
@@ -84,7 +101,6 @@ def work_func(df, idx, args):
                 s = ',%d_%d_%d' % (p[0], p[1], p[2])
                 fout.write(s)
             fout.write('\n')
-
 
 
 def main():
@@ -105,6 +121,7 @@ def main():
     else:
         data_dir = os.path.join(cfg.DATA_DIR, 'r2-test-a')
         df = pd.read_csv(os.path.join(data_dir, 'test.csv'))
+    args.data_dir = data_dir
     #df = df.sample(frac=1)
     num_worker = args.num_worker
     num_sample = len(df) // num_worker + 1

@@ -98,8 +98,7 @@ class PoseNet(gl.HybridBlock):
             out2 = self.limb_cpm[i](out)
             outs.append([out1, out2])
             out = F.concat(feat, out1, out2)
-            if i == 2:
-                out = F.stop_gradient(out)
+            out = F.stop_gradient(out)
         return outs
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
@@ -357,6 +356,65 @@ class MaskPoseNet(gl.HybridBlock):
         return mask, heatmap
 
 
+##### model for version 5
+
+class PoseNetNoPaf(gl.HybridBlock):
+
+    def __init__(self, num_kps, stages, channels):
+        super(PoseNetNoPaf, self).__init__()
+        with self.name_scope():
+            # backbone
+            self.backbone = None
+            # feature transfer
+            self.feature_trans = nn.HybridSequential()
+            self.feature_trans.add(nn.Conv2D(2*channels, 3, 1, 1, activation='relu'),
+                                   nn.Conv2D(channels, 3, 1, 1, activation='relu'))
+            # cpm
+            self.stages = stages
+            self.kps_cpm = nn.HybridSequential()
+            ks1 = [3, 3, 3, 1, 1]
+            ks2 = [7, 7, 7, 7, 7, 1, 1]
+            self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks1))
+            for _ in range(1, stages):
+                self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks2))
+
+    def hybrid_forward(self, F, x):
+        feat = self.backbone(x)  # pylint: disable=not-callable
+        feat = self.feature_trans(feat)
+        out = feat
+        outs = []
+        for i in range(self.stages):
+            out = self.kps_cpm[i](out)
+            outs.append(out)
+            out = F.concat(feat, out)
+        return outs
+
+    def init_backbone(self, creator, featname, fixed, pretrained=True):
+        install_backbone(self, creator, [featname], fixed, pretrained)
+
+    def predict(self, img, ctx, flip=True):
+        data = process_cv_img(img)
+        if flip:
+            data_flip = data[:, :, ::-1]
+            data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
+        else:
+            data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
+        out = self(batch)
+        heatmap = out[-1][0].asnumpy().astype('float64')
+        if flip:
+            # heatmap
+            heatmap_flip = out[-1][1].asnumpy().astype('float64')
+            heatmap_flip = heatmap_flip[:, :, ::-1]
+            for i, j in cfg.LANDMARK_SWAP:
+                tmp = heatmap_flip[i].copy()
+                heatmap_flip[i] = heatmap_flip[j]
+                heatmap_flip[j] = tmp
+            heatmap = (heatmap + heatmap_flip) / 2
+
+        return heatmap
+
+
 ##### detection model
 
 class GConv(gl.HybridBlock):
@@ -453,10 +511,16 @@ def load_model(model, version=2):
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    else:
+    elif version == 4:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v4[backbone]
+    elif version == 5:
+        prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
+        net = PoseNetNoPaf(num_kps=num_kps, stages=cpm_stages, channels=cpm_channels)
+        creator, featname, fixed = cfg.BACKBONE_v2[backbone]
+    else:
+        raise RuntimeError('no such version %d'%version)
     net.init_backbone(creator, featname, fixed, pretrained=False)
     net.load_params(model, mx.cpu(0))
     return net
@@ -473,14 +537,10 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
     #     scales = [400, 368, 296]
     scales = [440, 368, 224]
     h, w = img.shape[:2]
-    if version == 2:
-        heatmap = 0
-        paf = 0
-    elif version == 3:
-        heatmap = 0
-    else:
-        mask = 0
-        heatmap = 0
+    # init
+    heatmap = 0
+    paf = 0
+    mask = 0
     for scale in scales:
         factor = scale / max(h, w)
         img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
@@ -494,12 +554,18 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
             heatmap_ = net.predict(img, ctx)
             heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
             heatmap = heatmap + heatmap_
-        else:
+        elif version == 4:
             mask_, heatmap_ = net.predict(img, ctx)
             mask_ = cv2.resize(mask_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
             heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
             mask = mask + mask_
             heatmap = heatmap + heatmap_
+        elif version == 5:
+            heatmap_ = net.predict(img_, ctx)
+            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+            heatmap = heatmap + heatmap_
+        else:
+            raise RuntimeError('no such version %d'%version)
     if version == 2:
         heatmap /= len(scales)
         paf /= len(scales)
@@ -507,7 +573,12 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
     elif version == 3:
         heatmap /= len(scales)
         return heatmap
-    else:
+    elif version == 4:
         mask /= len(scales)
         heatmap /= len(scales)
         return mask, heatmap
+    elif version == 5:
+        heatmap /= len(scales)
+        return heatmap
+    else:
+        raise RuntimeError('no such version %d'%version)
