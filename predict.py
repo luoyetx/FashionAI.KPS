@@ -8,7 +8,6 @@ import cv2
 import mxnet as mx
 import numpy as np
 import pandas as pd
-from mxnet.name import NameManager
 
 from lib.config import cfg
 from lib.model import load_model, multi_scale_predict
@@ -23,19 +22,15 @@ def work_func(df, idx, args):
     # hyper parameters
     ctx = mx.cpu(0) if args.gpu == -1 else mx.gpu(args.gpu)
     data_dir = args.data_dir
+    model_path = args.model
     version = args.version
     show = args.show
     multi_scale = args.multi_scale
     logger = get_logger()
     # model
-    nets = []
-    for model_path in args.model:
-        # hack namescope
-        NameManager.current._counter = {}
-        net = load_model(model_path, version=version)
-        net.collect_params().reset_ctx(ctx)
-        net.hybridize()
-        nets.append(net)
+    net = load_model(model_path, version=version)
+    net.collect_params().reset_ctx(ctx)
+    net.hybridize()
     # data
     image_ids = df['image_id'].tolist()
     image_paths = [os.path.join(data_dir, img_id) for img_id in image_ids]
@@ -46,28 +41,15 @@ def work_func(df, idx, args):
         img = cv2.imread(path)
         # predict
         if version == 2:
-            heatmap, paf = 0, 0
-            for net in nets:
-                heatmap_, paf_ = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-                heatmap = heatmap + heatmap_
-                paf = paf + paf_
-            heatmap, paf = heatmap / len(nets), paf / len(nets)
+            heatmap, paf = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v1(img, heatmap, paf, category)
         elif version == 3:
-            heatmap = 0
-            for net in nets:
-                heatmap_ = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-                heatmap = heatmap + heatmap_
-            heatmap = heatmap / len(nets)
+            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
         elif version == 4:
             pass
         elif version == 5:
-            heatmap = 0
-            for net in nets:
-                heatmap_ = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-                heatmap = heatmap + heatmap_
-            heatmap = heatmap / len(nets)
+            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
             kps_pred = detect_kps_v3(img, heatmap, category)
         else:
             raise RuntimeError('no such version %d'%version)
@@ -124,7 +106,7 @@ def work_func(df, idx, args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default='0')
-    parser.add_argument('--model', type=str, nargs='*', required=True)
+    parser.add_argument('--model', type=str, required=True)
     parser.add_argument('--version', type=int, default=2)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--multi-scale', action='store_true')

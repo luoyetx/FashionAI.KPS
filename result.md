@@ -143,7 +143,7 @@ Average Error for trousers: 0.043519
 Total Average Error 0.041244
 ```
 
-public
+public 0.0396
 
 - v2.28 ensemble result of v2.25 and v2.26, skirt from v2.25, others from v2.26
 
@@ -156,4 +156,4 @@ Average Error for trousers: 0.042901
 Total Average Error 0.041215
 ```
 
-public
+public 0.0399

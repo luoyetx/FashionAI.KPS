@@ -97,8 +97,9 @@ class PoseNet(gl.HybridBlock):
             out1 = self.kps_cpm[i](out)
             out2 = self.limb_cpm[i](out)
             outs.append([out1, out2])
+            out1 = F.stop_gradient(out1)
+            out2 = F.stop_gradient(out2)
             out = F.concat(feat, out1, out2)
-            out = F.stop_gradient(out)
         return outs
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
