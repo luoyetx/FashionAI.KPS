@@ -131,3 +131,29 @@ Total Average Error 0.041319
 ```
 
 public 0.0399
+
+- v2.27 ensemble model of v2.25 and v2.26
+
+```
+Average Error for blouse: 0.040579
+Average Error for skirt: 0.036159
+Average Error for outwear: 0.041778
+Average Error for dress: 0.042013
+Average Error for trousers: 0.043519
+Total Average Error 0.041244
+```
+
+public
+
+- v2.28 ensemble result of v2.25 and v2.26, skirt from v2.25, others from v2.26
+
+```
+Average Error for blouse: 0.040602
+Average Error for skirt: 0.035972
+Average Error for outwear: 0.041627
+Average Error for dress: 0.042484
+Average Error for trousers: 0.042901
+Total Average Error 0.041215
+```
+
+public
