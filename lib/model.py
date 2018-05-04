@@ -57,10 +57,10 @@ class CPMBlock(gl.HybridBlock):
             for k in ks[:-1]:
                 self.net.add(nn.Conv2D(channels, k, 1, k // 2, activation='relu'))
             self.net.add(nn.Conv2D(num_output, ks[-1], 1, ks[-1] // 2))
-            for conv in self.net:
-                conv.weight.lr_mult = 4
-                conv.bias.lr_mult = 8
-                #conv.weight.wd_mult = 4
+            # for conv in self.net:
+            #     conv.weight.lr_mult = 4
+            #     conv.bias.lr_mult = 8
+            #     conv.weight.wd_mult = 4
 
     def hybrid_forward(self, F, x):
         return self.net(x)
@@ -439,9 +439,11 @@ class GConv(gl.HybridBlock):
 
 class DetNet(gl.HybridBlock):
 
-    def __init__(self, num_anchor):
+    def __init__(self, anchor_proposal):
         super(DetNet, self).__init__()
         num_category = 5
+        num_anchors = anchor_proposal.num_anchors
+        self.anchor_proposal = anchor_proposal
         with self.name_scope():
             self.backbone = None
             self.rpn = nn.HybridSequential()
@@ -449,8 +451,8 @@ class DetNet(gl.HybridBlock):
             self.rpn.add(GConv(64, num_category))
             # rpn_cls: N, C x A x 2, H, W
             # rpn_reg: N, C X A x 4, H, W
-            self.rpn_cls = nn.Conv2D(2*num_anchor*num_category, kernel_size=1, groups=num_category)
-            self.rpn_reg = nn.Conv2D(4*num_anchor*num_category, kernel_size=1, groups=num_category)
+            self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1, groups=num_category)
+            self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1, groups=num_category)
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
@@ -462,12 +464,14 @@ class DetNet(gl.HybridBlock):
     def init_backbone(self, creator, featname, fixed, pretrained=True):
         install_backbone(self, creator, [featname], fixed, pretrained)
 
-    def predict(self, img, ctx, anchor_proposal):
+    def predict(self, img, ctx, nms=True):
+        h, w = img.shape[:2]
         data = process_cv_img(img)
         data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
         anchor_cls, anchor_reg = self(batch)
-        dets = anchor_proposal.proposal(anchor_cls, anchor_reg)
+        dets = self.anchor_proposal.proposal(anchor_cls, anchor_reg, (h, w), nms)
+        dets = dets[0]
         return dets
 
 
@@ -528,10 +532,31 @@ def load_model(model, version=2):
     return net
 
 
+def multi_scale_detection(net, ctx, img, category, multi_scale=False):
+    if multi_scale:
+        scales = [440, 368, 224]
+    else:
+        scales = [368,]
+    h, w = img.shape[:2]
+    dets = []
+    cate_idx = cfg.CATEGORY.index(category)
+    for scale in scales:
+        factor = scale / max(h, w)
+        img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
+        dets_ = net.predict(img_, ctx, nms=False)
+        dets_ = dets_[cate_idx]
+        dets_[:, :4] /= factor
+        dets.append(dets_)
+    proposals = np.vstack(dets)
+    proposals = net.anchor_proposal.nms(proposals)
+    return proposals
+
+
 def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
-    if not multi_scale:
-        return net.predict(img, ctx)
-    scales = [440, 368, 224]
+    if multi_scale:
+        scales = [440, 368, 224]
+    else:
+        scales = [368,]
     h, w = img.shape[:2]
     # init
     heatmap = 0

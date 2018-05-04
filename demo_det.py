@@ -53,7 +53,7 @@ def main():
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
     anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    detnet = DetNet(anchor_proposal.num_anchors)
+    detnet = DetNet(anchor_proposal)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     detnet.init_backbone(creator, featname, fixed, pretrained=False)
     detnet.load_params(args.det_model, ctx)
@@ -72,9 +72,7 @@ def main():
         data, rois = testdata[test_idx]
         img = reverse_to_cv_img(data)
         h, w = img.shape[:2]
-        dets = detnet.predict(img, ctx, anchor_proposal)
-        assert len(dets) == 1
-        dets = dets[0]
+        dets = detnet.predict(img, ctx)
 
         cate_idx = cfg.CATEGORY.index(category)
         bbox = dets[cate_idx][0, :4]

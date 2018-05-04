@@ -143,7 +143,7 @@ def main():
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
     anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    net = DetNet(anchor_proposal.num_anchors)
+    net = DetNet(anchor_proposal)
     creator, featname, fixed = cfg.BACKBONE_Det[backbone]
     net.init_backbone(creator, featname, fixed, pretrained=True)
     net.initialize(mx.init.Normal(), ctx=ctx)

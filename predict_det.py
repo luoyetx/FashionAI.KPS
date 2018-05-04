@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from lib.config import cfg
-from lib.model import DetNet, load_model, multi_scale_predict
+from lib.model import DetNet, load_model, multi_scale_predict, multi_scale_detection
 from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger, crop_patch, draw_box
 from lib.detect_kps import detect_kps_v1, detect_kps_v3
 from lib.rpn import AnchorProposal
@@ -46,7 +46,7 @@ def work_func(df, idx, args):
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
     anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    detnet = DetNet(anchor_proposal.num_anchors)
+    detnet = DetNet(anchor_proposal)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     detnet.init_backbone(creator, featname, fixed, pretrained=False)
     detnet.load_params(args.det_model, ctx)
@@ -64,14 +64,16 @@ def work_func(df, idx, args):
         img = cv2.imread(path)
         # detection
         h, w = img.shape[:2]
-        dets = detnet.predict(img, ctx, anchor_proposal)
-        dets = dets[0]
-        cate_idx = cfg.CATEGORY.index(category)
-        bbox = dets[cate_idx][0, :4]
-        score = dets[cate_idx][0, -1]
+        dets = multi_scale_detection(detnet, ctx, img, category)
+        if len(dets) != 0:
+            bbox = dets[0, :4]
+            score = dets[0, -1]
+        else:
+            bbox = [0, 0, w, h]
+            score = 0
         bbox = get_border(bbox, w, h, 0.2)
-        # predict kps
         roi = crop_patch(img, bbox)
+        # predict kps
         if version == 2:
             heatmap, paf = multi_scale_predict(kpsnet, ctx, version, roi, category, multi_scale)
             kps_pred = detect_kps_v1(roi, heatmap, paf, category)

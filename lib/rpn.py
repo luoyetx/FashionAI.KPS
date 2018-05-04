@@ -42,7 +42,7 @@ class AnchorProposal(object):
         self.nms_th = 0.3
         self.score_th = 0.6
 
-    def target(self, rpn_cls, gt_boxes, im_info=(368, 368)):
+    def target(self, rpn_cls, gt_boxes, im_info=(368, 368), nms=True):
         ctx = rpn_cls.context
         # get score
         n, c, height, width = rpn_cls.shape
@@ -183,7 +183,7 @@ class AnchorProposal(object):
         batch_bbox_weights = nd.array(batch_bbox_weights, ctx)
         return batch_labels, batch_labels_weight, batch_bbox_targets, batch_bbox_weights
 
-    def proposal(self, rpn_cls, rpn_reg, im_info=(368, 368)):
+    def proposal(self, rpn_cls, rpn_reg, im_info=(368, 368), nms=True):
         # get score
         n, c, height, width = rpn_cls.shape
         rpn_score = nd.reshape(nd.transpose(rpn_cls, (0, 2, 3, 1)), (-1, 2))
@@ -235,10 +235,8 @@ class AnchorProposal(object):
                 category_scores = category_scores[order]
                 # nms
                 proposals = np.hstack([proposals, category_scores.reshape((-1, 1))])
-                keep = cpu_nms(proposals, self.nms_th)
-                proposals = proposals[keep]
-                keep = proposals[:, -1] > self.score_th
-                proposals = proposals[keep]
+                if nms:
+                    proposals = self.nms(proposals)
                 # result
                 res.append(proposals)
             dets.append(res)
@@ -260,6 +258,13 @@ class AnchorProposal(object):
         anchors = (self.anchors.reshape((1, A, 4)) + shifts.reshape((1, K, 4)).transpose((1, 0, 2)))
         anchors = anchors.reshape((K * A, 4))
         return anchors
+
+    def nms(self, proposals):
+        keep = cpu_nms(proposals, self.nms_th)
+        proposals = proposals[keep]
+        keep = proposals[:, -1] > self.score_th
+        proposals = proposals[keep]
+        return proposals
 
 
 def _unmap(data, count, inds, fill=0):
