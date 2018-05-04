@@ -60,6 +60,7 @@ class CPMBlock(gl.HybridBlock):
             for conv in self.net:
                 conv.weight.lr_mult = 4
                 conv.bias.lr_mult = 8
+                #conv.weight.wd_mult = 4
 
     def hybrid_forward(self, F, x):
         return self.net(x)
@@ -530,12 +531,6 @@ def load_model(model, version=2):
 def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
     if not multi_scale:
         return net.predict(img, ctx)
-    # if category in ['dress']:
-    #     scales = [400]
-    # elif category in ['blouse', 'skirt']:
-    #     scales = [440, 368, 224]
-    # else:
-    #     scales = [400, 368, 296]
     scales = [440, 368, 224]
     h, w = img.shape[:2]
     # init

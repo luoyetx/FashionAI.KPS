@@ -91,10 +91,12 @@ def draw_paf(im, paf):
     return draw_heatmap(im, paf)
 
 
-def draw_box(im, box):
+def draw_box(im, box, text=None):
     im = im.copy()
     x1, y1, x2, y2 = [int(_) for _ in box[:4]]
     cv2.rectangle(im, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    if text:
+        cv2.putText(im, text, (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
     return im
 
 

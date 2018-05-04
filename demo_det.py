@@ -13,15 +13,30 @@ import seaborn as sns
 from lib.dataset import FashionAIDetDataSet
 from lib.model import load_model, DetNet
 from lib.rpn import AnchorProposal
-from lib.utils import draw_det, reverse_to_cv_img
+from lib.utils import draw_det, draw_box, reverse_to_cv_img, crop_patch, draw_kps, draw_heatmap
 from lib.detect_kps import detect_kps_v1, detect_kps_v3
 from lib.config import cfg
+
+
+def get_border(bbox, w, h, expand=0.1):
+    xmin, ymin, xmax, ymax = bbox
+    bh, bw = ymax - ymin, xmax - xmin
+    xmin -= expand * bw
+    xmax += expand * bw
+    ymin -= expand * bh
+    ymax += expand * bh
+    xmin = max(min(int(xmin), w), 0)
+    xmax = max(min(int(xmax), w), 0)
+    ymin = max(min(int(ymin), h), 0)
+    ymax = max(min(int(ymax), h), 0)
+    return (xmin, ymin, xmax, ymax)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default='0')
-    parser.add_argument('--model', type=str, required=True)
+    parser.add_argument('--det-model', type=str, required=True)
+    parser.add_argument('--kps-model', type=str, required=True)
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--test-idx', type=int, default=0)
     args = parser.parse_args()
@@ -38,11 +53,14 @@ def main():
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
     anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    net = DetNet(anchor_proposal.num_anchors)
+    detnet = DetNet(anchor_proposal.num_anchors)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
-    net.init_backbone(creator, featname, fixed, pretrained=False)
-    net.load_params(args.model, ctx)
-    net.hybridize()
+    detnet.init_backbone(creator, featname, fixed, pretrained=False)
+    detnet.load_params(args.det_model, ctx)
+    detnet.hybridize()
+    kpsnet = load_model(args.kps_model, 2)
+    kpsnet.collect_params().reset_ctx(ctx)
+    kpsnet.hybridize()
     # data
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
     testdata = FashionAIDetDataSet(df_test, is_train=False)
@@ -53,12 +71,31 @@ def main():
 
         data, rois = testdata[test_idx]
         img = reverse_to_cv_img(data)
-        dets = net.predict(img, ctx, anchor_proposal)
+        h, w = img.shape[:2]
+        dets = detnet.predict(img, ctx, anchor_proposal)
         assert len(dets) == 1
         dets = dets[0]
 
-        img = draw_det(img, dets, category)
-        cv2.imshow('dets', img)
+        cate_idx = cfg.CATEGORY.index(category)
+        bbox = dets[cate_idx][0, :4]
+        score = dets[cate_idx][0, -1]
+        bbox = get_border(bbox, w, h, 0.2)
+        det_im = draw_box(img, bbox, '%s_%.2f' % (category, score))
+
+        x1, y1, x2, y2 = [int(_) for _ in bbox]
+        print(x1, y1, x2, y2, x2 - x1, y2 - y1)
+        cv2.imshow('dets', det_im)
+
+        roi = crop_patch(img, bbox)
+        heatmap, paf = kpsnet.predict(roi, ctx)
+        kps_pred = detect_kps_v1(roi, heatmap, paf, category)
+
+        ht = heatmap[landmark_idx].max(axis=0)
+        dr1 = draw_heatmap(roi, ht)
+        dr2 = draw_kps(roi, kps_pred)
+        cv2.imshow('ht', dr1)
+        cv2.imshow('kps', dr2)
+
         key = cv2.waitKey(0)
         if key == 27:
             break

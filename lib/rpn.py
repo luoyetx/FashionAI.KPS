@@ -234,14 +234,13 @@ class AnchorProposal(object):
                 proposals = proposals[order]
                 category_scores = category_scores[order]
                 # nms
-                keep = cpu_nms(np.hstack([proposals, category_scores.reshape((-1, 1))]), self.nms_th)
+                proposals = np.hstack([proposals, category_scores.reshape((-1, 1))])
+                keep = cpu_nms(proposals, self.nms_th)
                 proposals = proposals[keep]
-                category_scores = category_scores[keep]
-                keep = category_scores > self.score_th
+                keep = proposals[:, -1] > self.score_th
                 proposals = proposals[keep]
-                category_scores = category_scores[keep]
                 # result
-                res.append((proposals, category_scores))
+                res.append(proposals)
             dets.append(res)
         return dets
 
