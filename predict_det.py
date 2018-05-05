@@ -45,8 +45,8 @@ def work_func(df, idx, args):
     feat_stride = cfg.FEAT_STRIDE
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
-    anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    detnet = DetNet(anchor_proposal)
+    anchor_proposals = [AnchorProposal(scales[i], ratios, feat_stride[i]) for i in range(2)]
+    detnet = DetNet(anchor_proposals)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     detnet.init_backbone(creator, featname, fixed, pretrained=False)
     detnet.load_params(args.det_model, ctx)

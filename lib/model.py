@@ -57,10 +57,10 @@ class CPMBlock(gl.HybridBlock):
             for k in ks[:-1]:
                 self.net.add(nn.Conv2D(channels, k, 1, k // 2, activation='relu'))
             self.net.add(nn.Conv2D(num_output, ks[-1], 1, ks[-1] // 2))
-            # for conv in self.net:
-            #     conv.weight.lr_mult = 4
-            #     conv.bias.lr_mult = 8
-            #     conv.weight.wd_mult = 4
+            for conv in self.net:
+                conv.weight.lr_mult = 4
+                conv.bias.lr_mult = 8
+                #conv.weight.wd_mult = 4
 
     def hybrid_forward(self, F, x):
         return self.net(x)
@@ -437,41 +437,74 @@ class GConv(gl.HybridBlock):
         return feat
 
 
-class DetNet(gl.HybridBlock):
+class FPN(gl.HybridBlock):
 
-    def __init__(self, anchor_proposal):
-        super(DetNet, self).__init__()
-        num_category = 5
-        num_anchors = anchor_proposal.num_anchors
-        self.anchor_proposal = anchor_proposal
+    def __init__(self, num_channel):
+        super(FPN, self).__init__()
         with self.name_scope():
-            self.backbone = None
-            self.rpn = nn.HybridSequential()
-            self.rpn.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
-            self.rpn.add(GConv(64, num_category))
+            self.P8 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.P16 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.up = UpSampling(num_channel, 2)
+
+    def hybrid_forward(self, F, f8, f16):
+        f8 = self.P8(f8)
+        f16 = self.P16(f16)
+        f8 = f8 + F.Crop(self.up(f16), f8)
+        return f8, f16
+
+class RPN(gl.HybridBlock):
+
+    def __init__(self, num_anchors, num_category):
+        super(RPN, self).__init__()
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            self.body.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
+            self.body.add(GConv(64, num_category))
             # rpn_cls: N, C x A x 2, H, W
             # rpn_reg: N, C X A x 4, H, W
             self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1, groups=num_category)
             self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1, groups=num_category)
 
     def hybrid_forward(self, F, x):
-        feat = self.backbone(x)  # pylint: disable=not-callable
-        feat = self.rpn(feat)
-        anchor_cls = self.rpn_cls(feat)
-        anchor_reg = self.rpn_reg(feat)
+        x = self.body(x)
+        anchor_cls = self.rpn_cls(x)
+        anchor_reg = self.rpn_reg(x)
         return anchor_cls, anchor_reg
 
-    def init_backbone(self, creator, featname, fixed, pretrained=True):
-        install_backbone(self, creator, [featname], fixed, pretrained)
+
+class DetNet(gl.HybridBlock):
+
+    def __init__(self, anchor_proposals):
+        super(DetNet, self).__init__()
+        assert len(anchor_proposals) == 2
+        num_category = 5
+        self.anchor_proposals = anchor_proposals
+        with self.name_scope():
+            self.backbone = None
+            self.rpn1 = RPN(anchor_proposals[0].num_anchors, num_category)
+            self.rpn2 = RPN(anchor_proposals[1].num_anchors, num_category)
+
+    def hybrid_forward(self, F, x):
+        feats = self.backbone(x)  # pylint: disable=not-callable
+        anchor_cls1, anchor_reg1 = self.rpn1(feats[0])
+        anchor_cls2, anchor_reg2 = self.rpn2(feats[1])
+        return anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2
+
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
+        assert len(featnames) == 2
+        install_backbone(self, creator, featnames, fixed, pretrained)
 
     def predict(self, img, ctx, nms=True):
         h, w = img.shape[:2]
         data = process_cv_img(img)
         data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        anchor_cls, anchor_reg = self(batch)
-        dets = self.anchor_proposal.proposal(anchor_cls, anchor_reg, (h, w), nms)
-        dets = dets[0]
+        anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2 = self(batch)
+        dets1 = self.anchor_proposals[0].proposal(anchor_cls1, anchor_reg1, (h, w), nms)[0]
+        dets2 = self.anchor_proposals[0].proposal(anchor_cls2, anchor_reg2, (h, w), nms)[0]
+        dets = [np.vstack([x, y]) for x, y in zip(dets1, dets2)]
+        if nms:
+            dets = [self.anchor_proposals[0].nms(det) for det in dets]
         return dets
 
 
@@ -548,7 +581,7 @@ def multi_scale_detection(net, ctx, img, category, multi_scale=False):
         dets_[:, :4] /= factor
         dets.append(dets_)
     proposals = np.vstack(dets)
-    proposals = net.anchor_proposal.nms(proposals)
+    proposals = net.anchor_proposals[0].nms(proposals)
     return proposals
 
 

@@ -157,3 +157,16 @@ Total Average Error 0.041215
 ```
 
 public 0.0399
+
+- v10.0 based on Det.default-resnet50-BS32-sgd-0030.params and V2.default-vgg19-S3-C64-BS32-sgd-0100.params
+
+```
+Average Error for blouse: 0.055427
+Average Error for skirt: 0.056346
+Average Error for outwear: 0.060014
+Average Error for dress: 0.047308
+Average Error for trousers: 0.056334
+Total Average Error 0.054724
+```
+
+public 0.0519

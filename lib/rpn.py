@@ -305,17 +305,16 @@ def main():
     from dataset import FashionAIDetDataSet
     from utils import reverse_to_cv_img, draw_box, draw_kps, draw_det
 
+    ctx = mx.cpu()
     df = pd.read_csv('./data/val.csv')
     dataset = FashionAIDetDataSet(df, is_train=False)
     feat_stride = cfg.FEAT_STRIDE
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
-    anchor_proposal = AnchorProposal(scales, ratios, feat_stride)
-    A = anchor_proposal.num_anchors
-    print(anchor_proposal.anchors)
-
-    ctx = mx.cpu()
-    net = DetNet(A)
+    anchor_proposals = [AnchorProposal(scales[i], ratios, feat_stride[i]) for i in range(2)]
+    for anchor_proposal in anchor_proposals:
+        print(anchor_proposal.anchors)
+    net = DetNet(anchor_proposals)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     net.init_backbone(creator, featname, fixed, pretrained=True)
     net.load_params('./output/Det.more.anchor-resnet50-BS32-sgd-0030.params')

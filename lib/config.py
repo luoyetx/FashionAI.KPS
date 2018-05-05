@@ -44,8 +44,8 @@ cfg.SCALE_MIN_RATE = 0.6
 cfg.SCALE_MAX_RATE = 1.2
 cfg.CROP_CENTER_OFFSET_MAX = 40
 
-cfg.FEAT_STRIDE = 16
-cfg.DET_SCALES = [2, 4, 8, 16]  # size: feat_stride * scale
+cfg.FEAT_STRIDE = [8, 16]
+cfg.DET_SCALES = [[4, 8], [8, 16, 20]]  # size: feat_stride * scale
 cfg.DET_RATIOS = [1, 2, 3]  # height / width
 
 
@@ -68,7 +68,7 @@ cfg.BACKBONE_v4 = {
 }
 
 cfg.BACKBONE_Det = {
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage3_activation5', ['conv0']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage2_activation3', 'stage3_activation5'], ['conv0']),
 }
 
 cfg.EVAL_NORMAL_IDX = {
