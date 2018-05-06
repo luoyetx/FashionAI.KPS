@@ -45,7 +45,7 @@ cfg.SCALE_MAX_RATE = 1.2
 cfg.CROP_CENTER_OFFSET_MAX = 40
 
 cfg.FEAT_STRIDE = [8, 16]
-cfg.DET_SCALES = [[4, 8], [8, 16, 20]]  # size: feat_stride * scale
+cfg.DET_SCALES = [[8, 16], [16, 20]]  # size: feat_stride * scale
 cfg.DET_RATIOS = [1, 2, 3]  # height / width
 
 

@@ -110,8 +110,9 @@ def draw_det(im, det, draw_cate=None):
             continue
         category = cfg.CATEGORY[i]
         color = palette[i]
-        for proposal, score in zip(*det[i]):
-            x1, y1, x2, y2 = [int(_) for _ in proposal]
+        for proposal in det[i]:
+            x1, y1, x2, y2 = [int(_) for _ in proposal[:4]]
+            score = proposal[-1]
             cv2.rectangle(im, (x1, y1), (x2, y2), color, 1)
             cv2.putText(im, '%s_%0.2f' % (category, score), (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0))
     return im

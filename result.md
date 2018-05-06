@@ -91,6 +91,25 @@ sclae exploration
 
 ### test-a
 
+```
+train.csv
+train num: 57717
+blouse      12775
+skirt       12516
+trousers    11721
+outwear     10502
+dress       10203
+Name: image_category, dtype: int64
+val.csv
+val num: 6414
+skirt       1425
+blouse      1331
+trousers    1325
+outwear     1222
+dress       1111
+Name: image_category, dtype: int64
+```
+
 multi-scale [440, 368, 224], flip
 
 - v2.24 V2.default-vgg19-S3-C64-BS32-sgd-0100.params, test err 4.774
@@ -170,3 +189,29 @@ Total Average Error 0.054724
 ```
 
 public 0.0519
+
+- v2.29 V2.split.all.fms-vgg19-S5-C64-BS32-sgd-0093.params, test err 4.689
+
+```
+Average Error for blouse: 0.040975
+Average Error for skirt: 0.036438
+Average Error for outwear: 0.041878
+Average Error for dress: 0.042377
+Average Error for trousers: 0.043366
+Total Average Error 0.041466
+```
+
+public 0.0403
+
+- v3.0 V3.default-resnet50-C64-BS32-adam-0045.params, test err on refine 21.13
+
+```
+Average Error for blouse: 0.078661
+Average Error for skirt: 0.065999
+Average Error for outwear: 0.076792
+Average Error for dress: 0.066081
+Average Error for trousers: 0.065844
+Total Average Error 0.071932
+```
+
+public

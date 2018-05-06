@@ -60,7 +60,7 @@ class CPMBlock(gl.HybridBlock):
             for conv in self.net:
                 conv.weight.lr_mult = 4
                 conv.bias.lr_mult = 8
-                #conv.weight.wd_mult = 4
+                conv.weight.wd_mult = 4
 
     def hybrid_forward(self, F, x):
         return self.net(x)
@@ -452,6 +452,7 @@ class FPN(gl.HybridBlock):
         f8 = f8 + F.Crop(self.up(f16), f8)
         return f8, f16
 
+
 class RPN(gl.HybridBlock):
 
     def __init__(self, num_anchors, num_category):
@@ -481,13 +482,15 @@ class DetNet(gl.HybridBlock):
         self.anchor_proposals = anchor_proposals
         with self.name_scope():
             self.backbone = None
+            self.fpn = FPN(128)
             self.rpn1 = RPN(anchor_proposals[0].num_anchors, num_category)
             self.rpn2 = RPN(anchor_proposals[1].num_anchors, num_category)
 
     def hybrid_forward(self, F, x):
-        feats = self.backbone(x)  # pylint: disable=not-callable
-        anchor_cls1, anchor_reg1 = self.rpn1(feats[0])
-        anchor_cls2, anchor_reg2 = self.rpn2(feats[1])
+        f8, f16 = self.backbone(x)  # pylint: disable=not-callable
+        f8, f16 = self.fpn(f8, f16)
+        anchor_cls1, anchor_reg1 = self.rpn1(f8)
+        anchor_cls2, anchor_reg2 = self.rpn2(f16)
         return anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2
 
     def init_backbone(self, creator, featnames, fixed, pretrained=True):
@@ -501,7 +504,7 @@ class DetNet(gl.HybridBlock):
         batch = mx.nd.array(data, ctx=ctx)
         anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2 = self(batch)
         dets1 = self.anchor_proposals[0].proposal(anchor_cls1, anchor_reg1, (h, w), nms)[0]
-        dets2 = self.anchor_proposals[0].proposal(anchor_cls2, anchor_reg2, (h, w), nms)[0]
+        dets2 = self.anchor_proposals[1].proposal(anchor_cls2, anchor_reg2, (h, w), nms)[0]
         dets = [np.vstack([x, y]) for x, y in zip(dets1, dets2)]
         if nms:
             dets = [self.anchor_proposals[0].nms(det) for det in dets]

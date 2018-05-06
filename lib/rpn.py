@@ -22,7 +22,7 @@ from lib.cpu_nms import cpu_nms
 
 class AnchorProposal(object):
 
-    def __init__(self, scales, ratios, feat_stride):
+    def __init__(self, scales, ratios, feat_stride, anchor_per_sample=128):
         super(AnchorProposal, self).__init__()
         scales = np.array(scales)
         ratios = np.array(ratios)
@@ -34,7 +34,7 @@ class AnchorProposal(object):
         self.anchor_negative_overlap = 0.3
         self.anchor_positive_overlap = 0.5
         self.anchor_fg_fraction = 0.25
-        self.anchor_per_sample = 128
+        self.anchor_per_sample = anchor_per_sample
         self.hard_mining = True
         # test
         self.num_det_per_category = 64
@@ -42,7 +42,7 @@ class AnchorProposal(object):
         self.nms_th = 0.3
         self.score_th = 0.6
 
-    def target(self, rpn_cls, gt_boxes, im_info=(368, 368), nms=True):
+    def target(self, rpn_cls, gt_boxes, im_info=(368, 368)):
         ctx = rpn_cls.context
         # get score
         n, c, height, width = rpn_cls.shape
@@ -307,7 +307,7 @@ def main():
 
     ctx = mx.cpu()
     df = pd.read_csv('./data/val.csv')
-    dataset = FashionAIDetDataSet(df, is_train=False)
+    dataset = FashionAIDetDataSet(df, is_train=True)
     feat_stride = cfg.FEAT_STRIDE
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
@@ -317,9 +317,9 @@ def main():
     net = DetNet(anchor_proposals)
     creator, featname, fixed = cfg.BACKBONE_Det['resnet50']
     net.init_backbone(creator, featname, fixed, pretrained=True)
-    net.load_params('./output/Det.more.anchor-resnet50-BS32-sgd-0030.params')
-    # net.initialize(mx.init.Normal(), ctx=ctx)
-    # net.collect_params().reset_ctx(ctx)
+    #net.load_params('./output/Det.default-resnet50-BS16-sgd-0030.params')
+    net.initialize(mx.init.Normal(), ctx=ctx)
+    net.collect_params().reset_ctx(ctx)
 
     for idx, (data, gt_box) in enumerate(dataset):
         img = reverse_to_cv_img(data)
@@ -329,7 +329,10 @@ def main():
         cate_idx = cfg.CATEGORY.index(category)
         landmark_idx = cfg.LANDMARK_IDX[category]
 
-        rpn_cls, rpn_reg = net(nd.array(data.reshape((1, 3, 368, 368))))
+        anchor_proposal = anchor_proposals[0]
+        A = anchor_proposal.num_anchors
+        rpn_cls1, rpn_reg1, rpn_cls2, rpn_reg2 = net(nd.array(data.reshape((1, 3, 368, 368))))
+        rpn_cls, rpn_reg = rpn_cls1, rpn_reg1
         gt_box = nd.array(gt_box.reshape((1, 5)))
         batch_labels, batch_labels_weight, batch_bbox_targets, batch_bbox_weights = anchor_proposal.target(rpn_cls, gt_box)
 
@@ -341,7 +344,8 @@ def main():
         for i in range(num_category):
             offset_cls = i * A
             offset_reg = i * A * 4
-            base = 23 * 23
+            base_size = 46
+            base = base_size * base_size
             if i != cate_idx:
                 assert nd.sum(batch_labels[0, offset_cls: offset_cls+A] == 0) == base * A
                 assert nd.sum(batch_labels_weight[0, offset_cls: offset_cls+A] == 0) == base * A
@@ -365,7 +369,7 @@ def main():
                 select = batch_labels_weight[0, offset_cls: offset_cls+A] == 1
                 select = select.asnumpy().astype('bool')
                 select = select.transpose((1, 2, 0)).flatten()
-                anchors = anchor_proposal.get_anchors(23, 23)
+                anchors = anchor_proposal.get_anchors(base_size, base_size)
                 anchors = anchors[select]
                 labels = batch_labels[0, offset_cls: offset_cls+A]
                 labels = labels.asnumpy()

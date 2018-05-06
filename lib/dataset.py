@@ -34,7 +34,7 @@ def random_aug_img(img):
     return img
 
 
-def transform(img, kps, is_train=True, rot=True):
+def transform(img, kps, is_train=True, random_rot=True, random_scale=True):
     height, width = img.shape[:2]
     # flip
     if np.random.rand() < 0.5 and is_train:
@@ -45,7 +45,7 @@ def transform(img, kps, is_train=True, rot=True):
             kps[i] = kps[j]
             kps[j] = tmp
     # rotate
-    if is_train and rot:
+    if is_train and random_rot:
         angle = (np.random.random() - 0.5) * 2 * cfg.ROT_MAX
         center = (width // 2, height // 2)
         rot = cv2.getRotationMatrix2D(center, angle, 1)
@@ -59,7 +59,7 @@ def transform(img, kps, is_train=True, rot=True):
         xy = rot.dot(np.hstack([xy, np.ones((len(xy), 1))]).T).T
         kps[:, :2] = xy
     # scale
-    scale = np.random.rand() * (cfg.SCALE_MAX - cfg.SCALE_MIN) + cfg.SCALE_MIN if is_train else cfg.CROP_SIZE
+    scale = np.random.rand() * (cfg.SCALE_MAX - cfg.SCALE_MIN) + cfg.SCALE_MIN if is_train and random_scale else cfg.CROP_SIZE
     max_edge = max(height, width)
     scale_factor = scale / max_edge
     img = cv2.resize(img, (0, 0), img, scale_factor, scale_factor)
@@ -271,7 +271,7 @@ class FashionAIDetDataSet(gl.data.Dataset):
         category = self.category[idx]
         kps = self.kps[idx].copy()
         # transform
-        img, kps = transform(img, kps, self.is_train, rot=False)
+        img, kps = transform(img, kps, self.is_train, random_rot=False, random_scale=True)
         # preprocess
         height, width = img.shape[:2]
         img = process_cv_img(img)

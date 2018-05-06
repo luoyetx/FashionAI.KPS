@@ -23,9 +23,10 @@ from lib.utils import get_logger, Recorder
 
 class RpnClsLoss(gl.loss.Loss):
 
-    def __init__(self, axis=-1, weight=None, batch_axis=0, **kwargs):
+    def __init__(self, axis=-1, num_anchors=128, weight=None, batch_axis=0, **kwargs):
         super(RpnClsLoss, self).__init__(weight, batch_axis, **kwargs)
         self._axis = axis
+        self._num_anchors = num_anchors
 
     def hybrid_forward(self, F, pred, label, sample_weight=None):
         pred = F.reshape(F.transpose(pred, (0, 2, 3, 1)), (-1, 2))
@@ -35,7 +36,7 @@ class RpnClsLoss(gl.loss.Loss):
         pred = F.log_softmax(pred, self._axis)
         loss = -F.pick(pred, label, axis=self._axis, keepdims=True)
         loss = gl.loss._apply_weighting(F, loss, self._weight, sample_weight)
-        return F.sum(loss) / 256
+        return F.sum(loss) / self._num_anchors
 
 class RpnRegLoss(gl.loss.Loss):
 
@@ -47,7 +48,8 @@ class RpnRegLoss(gl.loss.Loss):
         return F.sum(loss)
 
 
-def forward_backward(net, criterion_cls, criterion_reg, ctx, data, rois, is_train=True):
+def forward_backward(net, criterions, ctx, data, rois, is_train=True):
+    criterion_cls1, criterion_cls2, criterion_reg = criterions
     data = gl.utils.split_and_load(data, ctx)
     rois = gl.utils.split_and_load(rois, ctx)
     ag.set_recording(is_train)
@@ -69,14 +71,14 @@ def forward_backward(net, criterion_cls, criterion_reg, ctx, data, rois, is_trai
         # parallel stops here
         batch_label1, batch_label_weight1, batch_bbox_targets1, batch_bbox_weights1 = anchor_proposals[0].target(rpn_cls1_, rois_, im_info)
         # loss cls
-        loss_cls1 = criterion_cls(rpn_cls1_, batch_label1, batch_label_weight1) / data_.shape[0]
+        loss_cls1 = criterion_cls1(rpn_cls1_, batch_label1, batch_label_weight1) / data_.shape[0]
         # loss reg
         loss_reg1 = criterion_reg(rpn_reg1_, batch_bbox_targets1, batch_bbox_weights1) / data_.shape[0]
         # feat 1/16
         # parallel stops here
         batch_label2, batch_label_weight2, batch_bbox_targets2, batch_bbox_weights2 = anchor_proposals[1].target(rpn_cls2_, rois_, im_info)
         # loss cls
-        loss_cls2 = criterion_cls(rpn_cls2_, batch_label2, batch_label_weight2) / data_.shape[0]
+        loss_cls2 = criterion_cls2(rpn_cls2_, batch_label2, batch_label_weight2) / data_.shape[0]
         # loss reg
         loss_reg2 = criterion_reg(rpn_reg2_, batch_bbox_targets2, batch_bbox_weights2) / data_.shape[0]
 
@@ -153,7 +155,8 @@ def main():
     feat_stride = cfg.FEAT_STRIDE
     scales = cfg.DET_SCALES
     ratios = cfg.DET_RATIOS
-    anchor_proposals = [AnchorProposal(scales[i], ratios, feat_stride[i]) for i in range(2)]
+    anchor_per_sample = [256, 128]
+    anchor_proposals = [AnchorProposal(scales[i], ratios, feat_stride[i], anchor_per_sample[i]) for i in range(2)]
     net = DetNet(anchor_proposals)
     creator, featname, fixed = cfg.BACKBONE_Det[backbone]
     net.init_backbone(creator, featname, fixed, pretrained=True)
@@ -163,10 +166,13 @@ def main():
         net.initialize(mx.init.Normal(), ctx=ctx)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
-    criterion_cls = RpnClsLoss()
+    criterion_cls1 = RpnClsLoss(num_anchors=256)
+    criterion_cls2 = RpnClsLoss(num_anchors=128)
     criterion_reg = RpnRegLoss()
-    criterion_cls.hybridize()
+    criterion_cls1.hybridize()
+    criterion_cls2.hybridize()
     criterion_reg.hybridize()
+    criterions = [criterion_cls1, criterion_cls2, criterion_reg]
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=lr_decay)
@@ -192,7 +198,7 @@ def main():
         for batch_idx, (data, rois) in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
             net.collect_params().zero_grad()
-            losses = forward_backward(net, criterion_cls, criterion_reg, ctx, data, rois, is_train=True)
+            losses = forward_backward(net, criterions, ctx, data, rois, is_train=True)
             trainer.step(1)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -215,7 +221,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, (data, rois) in enumerate(testloader):
-            losses = forward_backward(net, criterion_cls, criterion_reg, ctx, data, rois, is_train=False)
+            losses = forward_backward(net, criterions, ctx, data, rois, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)
