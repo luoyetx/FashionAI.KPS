@@ -87,6 +87,64 @@ def transform(img, kps, is_train=True, random_rot=True, random_scale=True):
     return img, kps
 
 
+def get_label(height, width, category, kps):
+    strides = [4, 8, 16]
+    sigma = 7
+    hts, pafs, objs, hts_mask, pafs_mask, objs_mask = [], [], [], [], [], []
+    for stride in strides:
+        grid_x = width // stride
+        grid_y = height // stride
+        # heatmap and mask
+        landmark_idx = cfg.LANDMARK_IDX[category]
+        num_kps = len(kps)
+        ht = np.zeros((num_kps, grid_y, grid_x))
+        ht_mask = np.zeros_like(ht)
+        for i, (x, y, v) in enumerate(kps):
+            if i in landmark_idx and v != -1:
+                ht_mask[i] = 1
+                putGaussianMaps(ht[i], ht_mask[i], x, y, v, stride, sigma)
+        # paf and mask
+        limb = cfg.PAF_LANDMARK_PAIR
+        num_limb = len(limb)
+        paf = np.zeros((2 * num_limb, grid_y, grid_x))
+        paf_mask = np.zeros_like(paf)
+        for idx, (idx1, idx2) in enumerate(limb):
+            x1, y1, v1 = kps[idx1]
+            x2, y2, v2 = kps[idx2]
+            if v1 != -1 and v2 != -1:
+                putVecMaps(paf[2*idx], paf[2*idx + 1], x1, y1, x2, y2, stride, cfg.HEATMAP_THRES)
+                paf_mask[2*idx] = 1
+                paf_mask[2*idx + 1] = 1
+        # obj and mask
+        obj = np.zeros((5, grid_y, grid_x))
+        obj_mask = np.zeros_like(obj)
+        cate_idx = cfg.CATEGORY.index(category)
+        xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0)
+        xmin = xmin // stride
+        ymin = ymin // stride
+        xmax = xmax // stride + 1
+        ymax = ymax // stride + 1
+        obj[cate_idx, ymin: ymax, xmin: xmax] = 1
+        obj_mask[cate_idx] = 1
+        # put all
+        hts.append(ht)
+        hts_mask.append(ht_mask)
+        pafs.append(paf)
+        pafs_mask.append(paf_mask)
+        objs.append(obj)
+        objs_mask.append(obj_mask)
+    # result
+    ht4, ht8, ht16 = [_.astype('float32') for _ in hts]
+    ht4_mask, ht8_mask, ht16_mask = [_.astype('float32') for _ in hts_mask]
+    paf4, paf8, paf16 = [_.astype('float32') for _ in pafs]
+    paf4_mask, paf8_mask, paf16_mask = [_.astype('float32') for _ in pafs_mask]
+    obj4, obj8, obj16 = [_.astype('float32') for _ in objs]
+    obj4_mask, obj8_mask, obj16_mask = [_.astype('float32') for _ in objs_mask]
+    return (ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask), \
+           (paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask), \
+           (obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask)
+
+
 def get_label_v2(height, width, category, kps):
     stride = 8
     sigma = 7
@@ -202,12 +260,9 @@ def get_label_v4(height, width, category, kps):
 
 class FashionAIKPSDataSet(gl.data.Dataset):
 
-    def __init__(self, df, version=2, is_train=True):
+    def __init__(self, df, is_train=True):
         self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
-        self.version = version
-        if version == 5:
-            self.version = 2
         # img path
         self.img_lst = df['image_id'].tolist()
         self.category = df['image_category'].tolist()
@@ -233,15 +288,13 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         img = process_cv_img(img)
         self.cur_kps = kps  # for debug and show
         # get label
-        if self.version == 2:
-            heatmap, paf, mask_heatmap, mask_paf = get_label_v2(height, width, category, kps)
-            return img, heatmap, paf, mask_heatmap, mask_paf
-        elif self.version == 3:
-            ht, mask = get_label_v3(height, width, category, kps)
-            return img, ht[0], mask[0], ht[1], mask[1], ht[2], mask[2]
-        else:
-            heatmap, heatmap_mask, obj, obj_mask = get_label_v4(height, width, category, kps)
-            return img, heatmap, heatmap_mask, obj, obj_mask
+        A, B, C = get_label(height, width, category, kps)
+        ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask = A
+        paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask = B
+        obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = C
+        return img, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, \
+               paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, \
+               obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask
 
     def __len__(self):
         return len(self.img_lst)
@@ -288,50 +341,34 @@ class FashionAIDetDataSet(gl.data.Dataset):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--version', type=int, default=2)
     parser.add_argument('--type', type=str, default='train', choices=['train', 'test'])
     args = parser.parse_args()
     print(args)
-    version = args.version
     np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
-    dataset = FashionAIKPSDataSet(df, version=version, is_train=args.type == 'train')
+    dataset = FashionAIKPSDataSet(df, is_train=args.type == 'train')
     print('DataSet Size', len(dataset))
     for idx, pack in enumerate(dataset):
-        if version == 2:
-            data, heatmap, paf, mask_heatmap, mask_paf = pack
-            heatmap = heatmap[::-1].max(axis=0)
-        elif version == 3:
-            data, ht4, mask4, ht8, mask8, ht16, mask16 = pack
-        else:
-            data, heatmap, heatmap_mask, obj, obj_mask = pack
+        # unpack
+        data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = pack
 
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
         category = dataset.category[idx]
 
-        if version == 2:
-            dr1 = draw_heatmap(img, heatmap)
-            dr2 = draw_paf(img, paf)
-            dr3 = draw_kps(img, kps)
-            cv2.imshow("heatmap", dr1)
-            cv2.imshow("paf", dr2)
-            cv2.imshow("kps", dr3)
-        elif version == 3:
-            dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
-            dr2 = draw_heatmap(img, ht8.max(axis=0), True)
-            dr3 = draw_heatmap(img, ht16.max(axis=0), True)
-            dr4 = draw_kps(img, kps)
-            cv2.imshow('h4', dr1)
-            cv2.imshow('h8', dr2)
-            cv2.imshow('h16', dr3)
-            cv2.imshow('kps', dr4)
-        else:
-            cate_idx = cfg.CATEGORY.index(category)
-            dr1 = draw_heatmap(img, heatmap.max(axis=0))
-            dr2 = draw_heatmap(img, obj[cate_idx])
-            cv2.imshow('heatmap', dr1)
-            cv2.imshow('obj', dr2)
+        cate_idx = cfg.CATEGORY.index(category)
+        dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
+        dr2 = draw_heatmap(img, ht8.max(axis=0), True)
+        dr3 = draw_heatmap(img, ht16.max(axis=0), True)
+        dr4 = draw_paf(img, paf8)
+        dr5 = draw_heatmap(img, obj8[cate_idx])
+        dr6 = draw_kps(img, kps)
+        cv2.imshow('h4', dr1)
+        cv2.imshow('h8', dr2)
+        cv2.imshow('h16', dr3)
+        cv2.imshow('paf8', dr4)
+        cv2.imshow('obj8', dr5)
+        cv2.imshow("kps", dr6)
 
         key = cv2.waitKey(0)
         if key == 27:

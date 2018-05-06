@@ -60,7 +60,7 @@ class CPMBlock(gl.HybridBlock):
             for conv in self.net:
                 conv.weight.lr_mult = 4
                 conv.bias.lr_mult = 8
-                conv.weight.wd_mult = 4
+                #conv.weight.wd_mult = 4
 
     def hybrid_forward(self, F, x):
         return self.net(x)
@@ -83,10 +83,10 @@ class PoseNet(gl.HybridBlock):
             self.limb_cpm = nn.HybridSequential()
             ks1 = [3, 3, 3, 1, 1]
             ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks1))
+            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
             self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks1))
             for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks2))
+                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
                 self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks2))
 
     def hybrid_forward(self, F, x):
@@ -98,8 +98,8 @@ class PoseNet(gl.HybridBlock):
             out1 = self.kps_cpm[i](out)
             out2 = self.limb_cpm[i](out)
             outs.append([out1, out2])
-            out1 = F.stop_gradient(out1)
-            out2 = F.stop_gradient(out2)
+            # out1 = F.stop_gradient(out1)
+            # out2 = F.stop_gradient(out2)
             out = F.concat(feat, out1, out2)
         return outs
 
@@ -242,8 +242,8 @@ class CascadePoseNet(gl.HybridBlock):
         self.num_channel = num_channel
         with self.name_scope():
             self.backbone = None
-            self.global_net = CPNGlobalBlock(self.num_kps + 1, self.num_channel)
-            self.refine_net = CPNRefineBlock(self.num_kps + 1, self.num_channel)
+            self.global_net = CPNGlobalBlock(self.num_kps, self.num_channel)
+            self.refine_net = CPNRefineBlock(self.num_kps, self.num_channel)
 
     def hybrid_forward(self, F, x):
         feats = self.backbone(x)  # pylint: disable=not-callable
@@ -334,8 +334,8 @@ class MaskPoseNet(gl.HybridBlock):
         super(MaskPoseNet, self).__init__()
         with self.name_scope():
             self.backbone = None
-            self.head = MaskHeatHead(num_kps + 1, num_channel)
-            self.refine = RefineNet(num_kps + 1, num_channel)
+            self.head = MaskHeatHead(num_kps, num_channel)
+            self.refine = RefineNet(num_kps, num_channel)
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
@@ -376,9 +376,9 @@ class PoseNetNoPaf(gl.HybridBlock):
             self.kps_cpm = nn.HybridSequential()
             ks1 = [3, 3, 3, 1, 1]
             ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks1))
+            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
             for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps + 1, channels, ks2))
+                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable

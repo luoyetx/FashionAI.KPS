@@ -214,4 +214,38 @@ Average Error for trousers: 0.065844
 Total Average Error 0.071932
 ```
 
-public
+public ?
+
+more train data
+
+```
+train.csv
+train num: 60924
+blouse      13423
+skirt       13249
+trousers    12372
+outwear     11103
+dress       10777
+Name: image_category, dtype: int64
+val.csv
+val num: 3207
+skirt       692
+blouse      683
+trousers    674
+outwear     621
+dress       537
+Name: image_category, dtype: int64
+```
+
+- v2.29 V2.split.all.fms-vgg19-S5-C64-BS32-sgd-0093.params, test err 4.689
+
+```
+Average Error for blouse: 0.041580
+Average Error for skirt: 0.034749
+Average Error for outwear: 0.041892
+Average Error for dress: 0.041630
+Average Error for trousers: 0.041655
+Total Average Error 0.041050
+```
+
+public 0.0403

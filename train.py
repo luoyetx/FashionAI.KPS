@@ -48,29 +48,29 @@ class SigmoidLoss(gl.loss.Loss):
 
 def forward_backward_v2(net, criterions, ctx, packet, is_train=True):
     ht_criterion, = criterions
-    data, heatmap, paf, heatmap_mask, paf_mask = packet
+    data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
-    heatmap = gl.utils.split_and_load(heatmap, ctx)
-    heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
-    paf = gl.utils.split_and_load(paf ,ctx)
-    paf_mask = gl.utils.split_and_load(paf_mask ,ctx)
+    ht8 = gl.utils.split_and_load(ht8, ctx)
+    ht8_mask = gl.utils.split_and_load(ht8_mask, ctx)
+    paf8 = gl.utils.split_and_load(paf8 ,ctx)
+    paf8_mask = gl.utils.split_and_load(paf8_mask ,ctx)
     # run
     ag.set_recording(is_train)
     ag.set_training(is_train)
     losses = []
-    for data_, heatmap_, paf_, heatmap_mask_, paf_mask_ in zip(data, heatmap, paf, heatmap_mask, paf_mask):
+    for data_, ht8_, paf8_, ht8_mask_, paf8_mask_ in zip(data, ht8, paf8, ht8_mask, paf8_mask):
         # forward
         out_ = net(data_)
         losses_ = []
         num_stages = len(out_)
         for i in range(num_stages):
-            out_[i][0] = nd.elemwise_mul(out_[i][0], heatmap_mask_)
-            out_[i][1] = nd.elemwise_mul(out_[i][1], paf_mask_)
-            heatmap_ = nd.elemwise_mul(heatmap_, heatmap_mask_)
-            paf_ = nd.elemwise_mul(paf_, paf_mask_)
-            losses_.append(ht_criterion(out_[i][0], heatmap_))
-            losses_.append(ht_criterion(out_[i][1], paf_))
+            out_[i][0] = nd.elemwise_mul(out_[i][0], ht8_mask_)
+            out_[i][1] = nd.elemwise_mul(out_[i][1], paf8_mask_)
+            ht8_ = nd.elemwise_mul(ht8_, ht8_mask_)
+            paf8_ = nd.elemwise_mul(paf8_, paf8_mask_)
+            losses_.append(ht_criterion(out_[i][0], ht8_))
+            losses_.append(ht_criterion(out_[i][1], paf8_))
         losses.append(losses_)
         # backward
         if is_train:
@@ -82,9 +82,9 @@ def forward_backward_v2(net, criterions, ctx, packet, is_train=True):
 
 def forward_backward_v3(net, criterions, ctx, packet, is_train=True):
     ht_criterion, = criterions
-    data, ht4, mask4, ht8, mask8, ht16, mask16 = packet
+    data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = packet
     ht = [ht4, ht8, ht16]
-    mask = [mask4, mask8, mask16]
+    mask = [ht4_mask, ht8_mask, ht16_mask]
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
     ht = [gl.utils.split_and_load(x, ctx) for x in ht]
@@ -112,24 +112,24 @@ def forward_backward_v3(net, criterions, ctx, packet, is_train=True):
 
 def forward_backward_v4(net, criterions, ctx, packet, is_train=True):
     ht_criterion, obj_criterion = criterions
-    data, ht, ht_mask, obj, obj_mask = packet
+    data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
-    ht = gl.utils.split_and_load(ht, ctx)
-    ht_mask = gl.utils.split_and_load(ht_mask, ctx)
-    obj = gl.utils.split_and_load(obj, ctx)
-    obj_mask = gl.utils.split_and_load(obj_mask, ctx)
+    ht8 = gl.utils.split_and_load(ht8, ctx)
+    ht8_mask = gl.utils.split_and_load(ht8_mask, ctx)
+    obj8 = gl.utils.split_and_load(obj8, ctx)
+    obj8_mask = gl.utils.split_and_load(obj8_mask, ctx)
     # run
     ag.set_recording(is_train)
     ag.set_training(is_train)
     losses = []
-    for data_, ht_, ht_mask_, obj_, obj_mask_ in zip(data, ht, ht_mask, obj, obj_mask):
+    for data_, ht8_, ht8_mask_, obj8_, obj8_mask_ in zip(data, ht8, ht8_mask, obj8, obj8_mask):
         # forward
-        obj_pred, ht_global_pred, ht_refine_pred = net(data_)
+        obj8_pred, ht8_global_pred, ht8_refine_pred = net(data_)
         # global
-        losses_ = [obj_criterion(obj_pred, obj_, obj_mask_),
-                   ht_criterion(ht_global_pred, ht_, ht_mask_),
-                   ht_criterion(ht_refine_pred, ht_, ht_mask_)]
+        losses_ = [obj_criterion(obj8_pred, obj8_, obj8_mask_),
+                   ht_criterion(ht8_global_pred, ht8_, ht8_mask_),
+                   ht_criterion(ht8_refine_pred, ht8_, ht8_mask_)]
         losses.append(losses_)
         # backward
         if is_train:
@@ -141,24 +141,24 @@ def forward_backward_v4(net, criterions, ctx, packet, is_train=True):
 
 def forward_backward_v5(net, criterions, ctx, packet, is_train=True):
     ht_criterion, = criterions
-    data, heatmap, paf, heatmap_mask, paf_mask = packet
+    data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
-    heatmap = gl.utils.split_and_load(heatmap, ctx)
-    heatmap_mask = gl.utils.split_and_load(heatmap_mask, ctx)
+    ht8 = gl.utils.split_and_load(ht8, ctx)
+    ht8_mask = gl.utils.split_and_load(ht8_mask, ctx)
     # run
     ag.set_recording(is_train)
     ag.set_training(is_train)
     losses = []
-    for data_, heatmap_, heatmap_mask_ in zip(data, heatmap, heatmap_mask):
+    for data_, ht8_, ht8_mask_ in zip(data, ht8, ht8_mask):
         # forward
         out_ = net(data_)
         losses_ = []
         num_stages = len(out_)
         for i in range(num_stages):
-            out_[i] = nd.elemwise_mul(out_[i], heatmap_mask_)
-            heatmap_ = nd.elemwise_mul(heatmap_, heatmap_mask_)
-            losses_.append(ht_criterion(out_[i], heatmap_))
+            out_[i] = nd.elemwise_mul(out_[i], ht8_mask_)
+            ht8_ = nd.elemwise_mul(ht8_, ht8_mask_)
+            losses_.append(ht_criterion(out_[i], ht8_))
         losses.append(losses_)
         # backward
         if is_train:
@@ -186,7 +186,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--wd', type=float, default=1e-4)
+    parser.add_argument('--wd', type=float, default=5e-4)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')
@@ -233,8 +233,8 @@ def main():
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    traindata = FashionAIKPSDataSet(df_train, version=version, is_train=True)
-    testdata = FashionAIKPSDataSet(df_test, version=version, is_train=False)
+    traindata = FashionAIKPSDataSet(df_train, is_train=True)
+    testdata = FashionAIKPSDataSet(df_test, is_train=False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)

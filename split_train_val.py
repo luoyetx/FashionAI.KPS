@@ -25,7 +25,7 @@ df_test_b['image_id'] = 'r1-test-b/' + df_test_b['image_id']
 # split train and val
 df = pd.concat([df, df_warmup, df_test_a, df_test_b])
 df = df.sample(frac=1, random_state=666).reset_index(drop=True)
-train_ratio = 0.9
+train_ratio = 0.95
 train_num = int(len(df) * train_ratio)
 df_train = df[:train_num]
 df_test = df[train_num:]
