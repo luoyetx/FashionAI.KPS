@@ -94,35 +94,12 @@ def work_func(df, idx, args):
         # show
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
-            dr0 = draw_box(img, bbox, '%s_%.2f' % (category, score))
-            cv2.imshow('det', dr0)
+            heatmap = heatmap[landmark_idx].max(axis=0)
+            cv2.imshow('det', draw_box(img, bbox, '%s_%.2f' % (category, score)))
+            cv2.imshow('heatmap', draw_heatmap(roi, heatmap))
+            cv2.imshow('kps_pred', draw_kps(img, kps_pred))
             if version == 2:
-                htall = heatmap[-1]
-                heatmap = heatmap[landmark_idx].max(axis=0)
-                dr1 = draw_heatmap(roi, heatmap)
-                dr2 = draw_paf(roi, paf)
-                dr3 = draw_kps(img, kps_pred)
-                dr4 = draw_heatmap(roi, htall)
-                cv2.imshow('heatmap', dr1)
-                cv2.imshow('paf', dr2)
-                cv2.imshow('kps_pred', dr3)
-                cv2.imshow('htall', dr4)
-            elif version == 3:
-                heatmap = heatmap[landmark_idx].max(axis=0)
-                dr1 = draw_heatmap(roi, heatmap)
-                dr2 = draw_kps(img, kps_pred)
-                cv2.imshow('heatmap', dr1)
-                cv2.imshow('kps_pred', dr2)
-            elif version == 4:
-                pass
-            elif version == 5:
-                heatmap = heatmap[landmark_idx].max(axis=0)
-                dr1 = draw_heatmap(roi, heatmap)
-                dr2 = draw_kps(img, kps_pred)
-                cv2.imshow('heatmap', dr1)
-                cv2.imshow('kps_pred', dr2)
-            else:
-                raise RuntimeError('no such version %d'%version)
+                cv2.imshow('paf', draw_paf(roi, paf))
             key = cv2.waitKey(0)
             if key == 27:
                 break
