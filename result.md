@@ -216,7 +216,7 @@ Total Average Error 0.071932
 
 public ?
 
-more train data
+more train data, remove ht_all
 
 ```
 train.csv
@@ -249,3 +249,16 @@ Total Average Error 0.041050
 ```
 
 public 0.0403
+
+- v2.30 V2.test-vgg19-S3-C64-BS32-sgd-0100.params, test err 2.158
+
+```
+Average Error for blouse: 0.040746
+Average Error for skirt: 0.036821
+Average Error for outwear: 0.042141
+Average Error for dress: 0.041398
+Average Error for trousers: 0.044314
+Total Average Error 0.041431
+```
+
+public 0.0407

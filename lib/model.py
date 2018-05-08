@@ -46,6 +46,48 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
         net.backbone = gl.SymbolBlock(outs, data, params=backbone.collect_params())
 
 
+class ContextBlock(gl.HybridBlock):
+
+    def __init__(self, num_channel=128):
+        super(ContextBlock, self).__init__()
+        with self.name_scope():
+            self.conv1 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.conv2 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
+            self.conv3 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
+            self.conv4_1 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
+            self.conv4_2 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
+
+    def hybrid_forward(self, F, x):
+        x1 = self.conv1(x)
+        x2 = self.conv2(x)
+        x3 = self.conv3(x2)
+        x4 = self.conv4_2(self.conv4_1(x2))
+        out = F.concat(x1, x3, x4)
+        return out
+
+
+class KpsPafBlock(gl.HybridBlock):
+
+    def __init__(self, num_kps, num_limb, num_channel=128):
+        super(KpsPafBlock, self).__init__()
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
+            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
+            self.kps = nn.HybridSequential()
+            self.kps.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
+            self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
+            self.paf = nn.HybridSequential()
+            self.paf.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
+            self.paf.add(nn.Conv2D(num_limb, kernel_size=1))
+
+    def hybrid_forward(self, F, x):
+        x = self.body(x)
+        kps = self.kps(x)
+        paf = self.paf(x)
+        return kps, paf
+
+
 ##### model for version 2
 
 class CPMBlock(gl.HybridBlock):
