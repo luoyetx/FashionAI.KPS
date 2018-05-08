@@ -84,9 +84,6 @@ def draw_heatmap(im, ht, resize_im=False):
 
 def draw_paf(im, paf):
     assert len(paf.shape) == 3, paf.shape
-    n, h, w = paf.shape
-    paf = paf.reshape((n // 2, 2, h, w))
-    paf = np.sqrt(np.square(paf[:, 0]) + np.square(paf[:, 1]))
     paf = paf.max(axis=0)
     return draw_heatmap(im, paf)
 

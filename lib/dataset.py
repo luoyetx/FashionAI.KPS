@@ -15,7 +15,7 @@ from lib.utils import draw_heatmap, draw_kps, draw_paf, draw_box
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': np.get_include()})
-from heatmap import putGaussianMaps, putVecMaps
+from heatmap import putGaussianMaps, putPafMaps
 
 
 def random_aug_img(img):
@@ -125,15 +125,14 @@ def get_label(height, width, category, kps):
         # paf and mask
         limb = cfg.PAF_LANDMARK_PAIR
         num_limb = len(limb)
-        paf = np.zeros((2 * num_limb, grid_y, grid_x))
+        paf = np.zeros((num_limb, grid_y, grid_x))
         paf_mask = np.zeros_like(paf)
         for idx, (idx1, idx2) in enumerate(limb):
             x1, y1, v1 = kps[idx1]
             x2, y2, v2 = kps[idx2]
             if v1 != -1 and v2 != -1:
-                putVecMaps(paf[2*idx], paf[2*idx + 1], x1, y1, x2, y2, stride, cfg.HEATMAP_THRES)
-                paf_mask[2*idx] = 1
-                paf_mask[2*idx + 1] = 1
+                putPafMaps(paf[idx], x1, y1, x2, y2, stride, cfg.HEATMAP_THRES)
+                paf_mask[idx] = 1
         # obj and mask
         obj = np.zeros((5, grid_y, grid_x))
         obj_mask = np.zeros_like(obj)

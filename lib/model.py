@@ -76,7 +76,7 @@ class KpsPafBlock(gl.HybridBlock):
             self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
             self.paf = nn.HybridSequential()
             self.paf.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.paf.add(nn.Conv2D(2*num_limb, kernel_size=1))
+            self.paf.add(nn.Conv2D(num_limb, kernel_size=1))
 
     def hybrid_forward(self, F, x):
         ht = self.kps(x)
@@ -441,14 +441,11 @@ def flip_prediction(ht, ht_flip, paf, paf_flip):
         for j in range(i, num):
             p3, p4 = cfg.PAF_LANDMARK_PAIR[j]
             if p1 == p3 and p2 == p4:
-                tmp = paf_flip[2*i: 2*i+2].copy()
-                paf_flip[2*i: 2*i+2] = paf_flip[2*j: 2*j+2]
-                paf_flip[2*j: 2*j+2] = tmp
-                paf_flip[2*i] *= -1  # flip x
-                paf_flip[2*j] *= -1
+                tmp = paf_flip[i].copy()
+                paf_flip[i] = paf_flip[j]
+                paf_flip[j] = tmp
             elif p1 == p4 and p2 == p3:
                 assert i == j
-                paf_flip[2*i+1] *= -1  # flip y
     paf = (paf + paf_flip) / 2
     return ht, paf
 

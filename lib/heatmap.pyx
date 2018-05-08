@@ -71,6 +71,46 @@ def putVecMaps(np.ndarray[DTYPE_t, ndim = 2] entryX, np.ndarray[DTYPE_t, ndim = 
 
 
 @cython.boundscheck(False)
+def putPafMaps(np.ndarray[DTYPE_t, ndim = 2] entryX, DTYPE_t center1_x, DTYPE_t center1_y,
+               DTYPE_t center2_x, DTYPE_t center2_y, int stride, DTYPE_t thres):
+    cdef int grid_y = entryX.shape[0]
+    cdef int grid_x = entryX.shape[1]
+
+    cdef DTYPE_t centerA_x = center1_x / stride
+    cdef DTYPE_t centerA_y = center1_y / stride
+
+    cdef DTYPE_t centerB_x = center2_x / stride
+    cdef DTYPE_t centerB_y = center2_y / stride
+
+    cdef DTYPE_t vec_x = centerB_x - centerA_x
+    cdef DTYPE_t vec_y = centerB_y - centerA_y
+
+    cdef int min_x = max(int(round(min(centerA_x, centerB_x)) - thres), 0)
+    cdef int max_x = min(int(round(max(centerA_x, centerB_x))) + thres, grid_x)
+    cdef int min_y = max(int(round(min(centerA_y, centerB_y) - thres)), 0)
+    cdef int max_y = min(int(round(max(centerA_y, centerB_y) + thres)), grid_y)
+
+    cdef DTYPE_t norm = np.sqrt(vec_x * vec_x + vec_y * vec_y)
+    if norm == 0:
+        return
+
+    vec_x /= norm
+    vec_y /= norm
+
+    cdef DTYPE_t p_x, p_y
+    cdef DTYPE_t dist
+    cdef int g_y, g_x
+
+    for g_y in range(min_y, max_y):
+        for g_x in range(min_x, max_x):
+            p_x = g_x - centerA_x
+            p_y = g_y - centerA_y
+            dist = np.absolute(p_x * vec_y - p_y * vec_x)
+            if dist <= thres:
+                entryX[g_y, g_x] = 1
+
+
+@cython.boundscheck(False)
 def pickPeeks(np.ndarray[DTYPE_t, ndim = 2] heatMap, np.ndarray[DTYPE_t, ndim = 2] mask, DTYPE_t thres):
     cdef int height = heatMap.shape[0]
     cdef int width = heatMap.shape[1]

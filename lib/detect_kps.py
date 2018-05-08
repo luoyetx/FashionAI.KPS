@@ -43,7 +43,7 @@ def detect_kps(img, heatmap, paf, category):
     sigma = 1
     thres1 = 0.1
     num_mid = 10
-    thres2 = 0.05
+    thres2 = 0.1
     # peaks
     peaks = []
     heatmap = heatmap[:, :, landmark_idx]
@@ -67,7 +67,7 @@ def detect_kps(img, heatmap, paf, category):
         nB = len(candB)
         if nA != 0 and nB != 0:
             connection_candidate = []
-            score = paf[:, :, 2*idx: 2*idx+2]
+            score = paf[:, :, idx]
             for i in range(nA):
                 for j in range(nB):
                     vec = np.subtract(candB[j][:2], candA[i][:2])
@@ -75,9 +75,7 @@ def detect_kps(img, heatmap, paf, category):
                     norm = max(norm, 1e-5)
                     vec = np.divide(vec, norm)
                     startend = zip(np.linspace(candA[i][0], candB[j][0], num=num_mid), np.linspace(candA[i][1], candB[j][1], num=num_mid))
-                    vec_x = np.array([score[int(round(startend[k][1])), int(round(startend[k][0])), 0] for k in range(len(startend))])
-                    vec_y = np.array([score[int(round(startend[k][1])), int(round(startend[k][0])), 1] for k in range(len(startend))])
-                    score_mid = np.multiply(vec_x, vec[0]) + np.multiply(vec_y, vec[1])
+                    score_mid = np.array([score[int(round(startend[k][1])), int(round(startend[k][0]))] for k in range(len(startend))])
                     score_with_dist_prior = sum(score_mid) / len(score_mid) + min(0.5*h/norm - 1, 0)
                     c1 = (score_mid > thres2).sum() > 0.8 * len(score_mid)
                     c2 = score_with_dist_prior > 0
