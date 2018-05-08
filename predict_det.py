@@ -11,8 +11,9 @@ import pandas as pd
 
 from lib.config import cfg
 from lib.model import DetNet, load_model, multi_scale_predict, multi_scale_detection
-from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger, crop_patch, draw_box
-from lib.detect_kps import detect_kps_v1, detect_kps_v3
+from lib.utils import draw_heatmap, draw_paf, draw_kps, draw_box
+from lib.utils import get_logger, crop_patch
+from lib.detect_kps import detect_kps
 from lib.rpn import AnchorProposal
 
 
@@ -74,19 +75,8 @@ def work_func(df, idx, args):
         bbox = get_border(bbox, w, h, 0.2)
         roi = crop_patch(img, bbox)
         # predict kps
-        if version == 2:
-            heatmap, paf = multi_scale_predict(kpsnet, ctx, version, roi, category, multi_scale)
-            kps_pred = detect_kps_v1(roi, heatmap, paf, category)
-        elif version == 3:
-            heatmap = multi_scale_predict(kpsnet, ctx, version, roi, category, multi_scale)
-            kps_pred = detect_kps_v3(roi, heatmap, category)
-        elif version == 4:
-            pass
-        elif version == 5:
-            heatmap = multi_scale_predict(kpsnet, ctx, version, roi, category, multi_scale)
-            kps_pred = detect_kps_v3(roi, heatmap, category)
-        else:
-            raise RuntimeError('no such version %d'%version)
+        heatmap, paf = multi_scale_predict(kpsnet, ctx, roi, multi_scale)
+        kps_pred = detect_kps(roi, heatmap, paf, category)
         x1, y1 = bbox[:2]
         kps_pred[:, 0] += x1
         kps_pred[:, 1] += y1
@@ -98,8 +88,7 @@ def work_func(df, idx, args):
             cv2.imshow('det', draw_box(img, bbox, '%s_%.2f' % (category, score)))
             cv2.imshow('heatmap', draw_heatmap(roi, heatmap))
             cv2.imshow('kps_pred', draw_kps(img, kps_pred))
-            if version == 2:
-                cv2.imshow('paf', draw_paf(roi, paf))
+            cv2.imshow('paf', draw_paf(roi, paf))
             key = cv2.waitKey(0)
             if key == 27:
                 break

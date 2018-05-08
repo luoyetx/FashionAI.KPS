@@ -167,7 +167,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--wd', type=float, default=5e-4)
+    parser.add_argument('--wd', type=float, default=1e-4)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')

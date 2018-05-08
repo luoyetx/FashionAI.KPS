@@ -127,7 +127,7 @@ class PoseNet(gl.HybridBlock):
             self.feat_trans = nn.Conv2D(num_channel, 3, 1, 1, activation='relu')
             # cpm
             self.cpm = nn.HybridSequential()
-            num_context = [1, 2, 3, 3, 3]
+            num_context = [2, 2, 2, 2, 2]
             for i in range(num_stage):
                 self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_context[i]))
 
@@ -311,7 +311,7 @@ class RefineNet(gl.HybridBlock):
 class MaskPoseNet(gl.HybridBlock):
 
     def __init__(self, num_kps, num_channel):
-        super(MaskPoseNet, self).__init__()
+        super(MaskPoseNet, self).__init__(prefix='maskpose')
         with self.name_scope():
             self.backbone = None
             self.head = MaskHeatHead(num_kps, num_channel)
@@ -397,7 +397,7 @@ class RPN(gl.HybridBlock):
 class DetNet(gl.HybridBlock):
 
     def __init__(self, anchor_proposals):
-        super(DetNet, self).__init__()
+        super(DetNet, self).__init__(prefix='detnet')
         assert len(anchor_proposals) == 2
         num_category = 5
         self.anchor_proposals = anchor_proposals
@@ -510,7 +510,7 @@ def load_model(model, version=2):
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
     elif version == 3:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
-        net = CascadePoseNet(num_kps=num_kps, num_channel=num_channel)
+        net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
     elif version == 4:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
@@ -543,7 +543,7 @@ def multi_scale_detection(net, ctx, img, category, multi_scale=False):
     return proposals
 
 
-def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
+def multi_scale_predict(net, ctx, img, multi_scale=False):
     if multi_scale:
         scales = [440, 368, 224]
     else:
@@ -552,38 +552,14 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
     # init
     heatmap = 0
     paf = 0
-    mask = 0
     for scale in scales:
         factor = scale / max(h, w)
         img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
-        if version == 2:
-            heatmap_, paf_ = net.predict(img_, ctx)
-            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            heatmap = heatmap + heatmap_
-            paf = paf + paf_
-        elif version == 3:
-            heatmap_ = net.predict(img, ctx)
-            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            heatmap = heatmap + heatmap_
-        elif version == 4:
-            mask_, heatmap_ = net.predict(img, ctx)
-            mask_ = cv2.resize(mask_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            mask = mask + mask_
-            heatmap = heatmap + heatmap_
-        else:
-            raise RuntimeError('no such version %d'%version)
-    if version == 2:
-        heatmap /= len(scales)
-        paf /= len(scales)
-        return heatmap, paf
-    elif version == 3:
-        heatmap /= len(scales)
-        return heatmap
-    elif version == 4:
-        mask /= len(scales)
-        heatmap /= len(scales)
-        return mask, heatmap
-    else:
-        raise RuntimeError('no such version %d'%version)
+        heatmap_, paf_ = net.predict(img_, ctx)
+        heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+        paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+        heatmap = heatmap + heatmap_
+        paf = paf + paf_
+    heatmap /= len(scales)
+    paf /= len(scales)
+    return heatmap, paf

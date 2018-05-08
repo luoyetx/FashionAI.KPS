@@ -12,7 +12,7 @@ import pandas as pd
 from lib.config import cfg
 from lib.model import load_model, multi_scale_predict
 from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger
-from lib.detect_kps import detect_kps_v1, detect_kps_v3
+from lib.detect_kps import detect_kps
 
 
 file_pattern = './result/tmp_%s_result_%d.csv'
@@ -40,16 +40,8 @@ def work_func(df, idx, args):
     for i, (path, category) in enumerate(zip(image_paths, image_categories)):
         img = cv2.imread(path)
         # predict
-        if version == 2:
-            heatmap, paf = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-            kps_pred = detect_kps_v1(img, heatmap, paf, category)
-        elif version == 3:
-            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-            kps_pred = detect_kps_v3(img, heatmap, category)
-        elif version == 4:
-            pass
-        else:
-            raise RuntimeError('no such version %d'%version)
+        heatmap, paf = multi_scale_predict(net, ctx, img, multi_scale)
+        kps_pred = detect_kps(img, heatmap, paf, category)
         result.append(kps_pred)
         # show
         if show:
@@ -57,8 +49,7 @@ def work_func(df, idx, args):
             heatmap = heatmap[landmark_idx].max(axis=0)
             cv2.imshow('heatmap', draw_heatmap(img, heatmap))
             cv2.imshow('kps_pred', draw_kps(img, kps_pred))
-            if version == 2:
-                cv2.imshow('paf', draw_paf(img, paf))
+            cv2.imshow('paf', draw_paf(img, paf))
             key = cv2.waitKey(0)
             if key == 27:
                 break
