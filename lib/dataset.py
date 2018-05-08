@@ -237,7 +237,7 @@ class FashionAIDetDataSet(gl.data.Dataset):
         self.cur_kps = kps  # for debug and show
         # get label
         xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0)
-        cate_idx = cfg.CATEGORY.index(category)
+        cate_idx = cfg.DET_CATE[category]
         label = np.array([xmin, ymin, xmax, ymax, cate_idx], dtype='float32')
         return img, label
 

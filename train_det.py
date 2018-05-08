@@ -232,9 +232,6 @@ def main():
         toc = time.time()
         logger.info('[Epoch %d] Test Cost %.0f sec', epoch_idx + 1, toc - tic)
         # save part
-        save_path = './output/%s-%04d.meta' % (base_name, epoch_idx + 1)
-        pickle.dump(global_step, open(save_path, 'wb'))
-        logger.info('[Epoch %d] Saved to %s', epoch_idx + 1, save_path)
         save_path = './output/%s-%04d.params' % (base_name, epoch_idx + 1)
         net.save_params(save_path)
         logger.info('[Epoch %d] Saved to %s', epoch_idx + 1, save_path)

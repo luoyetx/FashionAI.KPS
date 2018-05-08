@@ -29,10 +29,11 @@ class AnchorProposal(object):
         self.feat_stride = feat_stride
         self.anchors = generate_anchors(feat_stride, ratios, scales)
         self.num_anchors = self.anchors.shape[0]
+        self.num_category = 3
         # train
         self.allowed_border = 0
-        self.anchor_negative_overlap = 0.3
-        self.anchor_positive_overlap = 0.5
+        self.anchor_negative_overlap = 0.4
+        self.anchor_positive_overlap = 0.6
         self.anchor_fg_fraction = 0.25
         self.anchor_per_sample = anchor_per_sample
         self.hard_mining = True
@@ -49,7 +50,7 @@ class AnchorProposal(object):
         rpn_score = nd.reshape(nd.transpose(rpn_cls, (0, 2, 3, 1)), (-1, 2))
         rpn_score = nd.softmax(rpn_score, axis=-1)
         rpn_score = nd.transpose(nd.reshape(rpn_score, (n, height, width, c)), (0, 3, 1, 2))
-        num_category = 5
+        num_category = self.num_category
         # 1. Generate proposals from bbox deltas and shifted anchors
         shift_x = np.arange(0, width) * self.feat_stride
         shift_y = np.arange(0, height) * self.feat_stride
@@ -189,7 +190,7 @@ class AnchorProposal(object):
         rpn_score = nd.reshape(nd.transpose(rpn_cls, (0, 2, 3, 1)), (-1, 2))
         rpn_score = nd.softmax(rpn_score, axis=-1)
         rpn_score = nd.transpose(nd.reshape(rpn_score, (n, height, width, c)), (0, 3, 1, 2))
-        num_category = 5
+        num_category = self.num_category
         rpn_score = rpn_score.asnumpy()
         rpn_reg = rpn_reg.asnumpy()
         # 1. Generate proposals from bbox deltas and shifted anchors

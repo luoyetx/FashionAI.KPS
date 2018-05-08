@@ -46,6 +46,13 @@ cfg.CROP_CENTER_OFFSET_MAX = 40
 cfg.FEAT_STRIDE = [8, 16]
 cfg.DET_SCALES = [[8, 16], [16, 20]]  # size: feat_stride * scale
 cfg.DET_RATIOS = [1, 2, 3]  # height / width
+cfg.DET_CATE = {
+    'blouse': 0,
+    'skirt': 1,
+    'outwear': 2,
+    'dress': 2,
+    'trousers': 1,
+}
 
 
 cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB

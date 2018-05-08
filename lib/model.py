@@ -340,31 +340,13 @@ class MaskPoseNet(gl.HybridBlock):
 
 ##### detection model
 
-class GConv(gl.HybridBlock):
-
-    def __init__(self, channels, groups):
-        super(GConv, self).__init__()
-        self.groups = groups
-        with self.name_scope():
-            self.body = nn.HybridSequential()
-            for _ in range(groups):
-                self.body.add(nn.Conv2D(channels, kernel_size=3, padding=1, activation='relu'))
-
-    def hybrid_forward(self, F, x):
-        feat = []
-        for i in range(self.groups):
-            feat.append(self.body[i](x))
-        feat = F.concat(*feat)
-        return feat
-
-
-class FPN(gl.HybridBlock):
+class FPNBlock(gl.HybridBlock):
 
     def __init__(self, num_channel):
-        super(FPN, self).__init__()
+        super(FPNBlock, self).__init__()
         with self.name_scope():
-            self.P8 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
-            self.P16 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.P8 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
+            self.P16 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
             self.up = UpSamplingBlock(num_channel, 2)
 
     def hybrid_forward(self, F, f8, f16):
@@ -374,18 +356,17 @@ class FPN(gl.HybridBlock):
         return f8, f16
 
 
-class RPN(gl.HybridBlock):
+class RPNBlock(gl.HybridBlock):
 
     def __init__(self, num_anchors, num_category):
-        super(RPN, self).__init__()
+        super(RPNBlock, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
             self.body.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
-            self.body.add(GConv(64, num_category))
             # rpn_cls: N, C x A x 2, H, W
             # rpn_reg: N, C X A x 4, H, W
-            self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1, groups=num_category)
-            self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1, groups=num_category)
+            self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1)
+            self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1)
 
     def hybrid_forward(self, F, x):
         x = self.body(x)
@@ -399,13 +380,13 @@ class DetNet(gl.HybridBlock):
     def __init__(self, anchor_proposals):
         super(DetNet, self).__init__(prefix='detnet')
         assert len(anchor_proposals) == 2
-        num_category = 5
+        num_category = 3
         self.anchor_proposals = anchor_proposals
         with self.name_scope():
             self.backbone = None
-            self.fpn = FPN(128)
-            self.rpn1 = RPN(anchor_proposals[0].num_anchors, num_category)
-            self.rpn2 = RPN(anchor_proposals[1].num_anchors, num_category)
+            self.fpn = FPNBlock(num_channel=128)
+            self.rpn1 = RPNBlock(anchor_proposals[0].num_anchors, num_category)
+            self.rpn2 = RPNBlock(anchor_proposals[1].num_anchors, num_category)
 
     def hybrid_forward(self, F, x):
         f8, f16 = self.backbone(x)  # pylint: disable=not-callable
@@ -527,10 +508,10 @@ def multi_scale_detection(net, ctx, img, category, multi_scale=False):
     if multi_scale:
         scales = [440, 368, 224]
     else:
-        scales = [368,]
+        scales = [368]
     h, w = img.shape[:2]
     dets = []
-    cate_idx = cfg.CATEGORY.index(category)
+    cate_idx = cfg.DET_CATE[category]
     for scale in scales:
         factor = scale / max(h, w)
         img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
@@ -547,7 +528,7 @@ def multi_scale_predict(net, ctx, img, multi_scale=False):
     if multi_scale:
         scales = [440, 368, 224]
     else:
-        scales = [368,]
+        scales = [368]
     h, w = img.shape[:2]
     # init
     heatmap = 0

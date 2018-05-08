@@ -274,4 +274,4 @@ Average Error for trousers: 0.057418
 Total Average Error 0.059184
 ```
 
-public ?
+public 0.0554
