@@ -262,3 +262,16 @@ Total Average Error 0.041431
 ```
 
 public 0.0407
+
+- v3.1 V3.default-resnet50-C64-BS16-adam-0060.params, test err on refine 8.221
+
+```
+Average Error for blouse: 0.064561
+Average Error for skirt: 0.048746
+Average Error for outwear: 0.063303
+Average Error for dress: 0.054035
+Average Error for trousers: 0.057418
+Total Average Error 0.059184
+```
+
+public ?

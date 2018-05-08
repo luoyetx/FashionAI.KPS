@@ -87,6 +87,25 @@ def transform(img, kps, is_train=True, random_rot=True, random_scale=True):
     return img, kps
 
 
+def get_border(shape, kps, expand=0):
+    h, w = shape
+    keep = kps[:, 2] != -1
+    xmin = kps[keep, 0].min()
+    xmax = kps[keep, 0].max()
+    ymin = kps[keep, 1].min()
+    ymax = kps[keep, 1].max()
+    bh, bw = ymax - ymin, xmax - xmin
+    xmin -= expand * bw
+    xmax += expand * bw
+    ymin -= expand * bh
+    ymax += expand * bh
+    xmin = max(min(int(xmin), w), 0)
+    xmax = max(min(int(xmax), w), 0)
+    ymin = max(min(int(ymin), h), 0)
+    ymax = max(min(int(ymax), h), 0)
+    return (xmin, ymin, xmax, ymax)
+
+
 def get_label(height, width, category, kps):
     strides = [4, 8, 16]
     sigma = 7
@@ -143,119 +162,6 @@ def get_label(height, width, category, kps):
     return (ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask), \
            (paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask), \
            (obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask)
-
-
-def get_label_v2(height, width, category, kps):
-    stride = 8
-    sigma = 7
-    grid_x = width // stride
-    grid_y = height // stride
-    # heatmap and mask
-    landmark_idx = cfg.LANDMARK_IDX[category]
-    num_kps = len(kps)
-    heatmap = np.zeros((num_kps + 1, grid_y, grid_x))
-    heatmap_mask = np.zeros_like(heatmap)
-    for i, (x, y, v) in enumerate(kps):
-        if i in landmark_idx and v != -1:
-            heatmap_mask[i] = 1
-            putGaussianMaps(heatmap[i], heatmap_mask[i], x, y, v, stride, sigma)
-            # ht = heatmap[i]
-            # ht = (ht * 255).astype(np.uint8)
-            # ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
-            # cv2.imshow('ht', cv2.resize(ht, (0, 0), ht, 4, 4))
-            # ht = heatmap_mask[i]
-            # ht = (ht * 255).astype(np.uint8)
-            # ht = cv2.applyColorMap(ht, cv2.COLORMAP_JET)
-            # cv2.imshow('mask', cv2.resize(ht, (0, 0), ht, 4, 4))
-            # cv2.waitKey(0)
-    heatmap[-1] = heatmap[::-1].max(axis=0)
-    heatmap_mask[-1] = 1
-    # paf
-    limb = cfg.PAF_LANDMARK_PAIR
-    num_limb = len(limb)
-    paf = np.zeros((2 * num_limb, grid_y, grid_x))
-    paf_mask = np.zeros_like(paf)
-    for idx, (idx1, idx2) in enumerate(limb):
-        x1, y1, v1 = kps[idx1]
-        x2, y2, v2 = kps[idx2]
-        if v1 != -1 and v2 != -1:
-            putVecMaps(paf[2*idx], paf[2*idx + 1], x1, y1, x2, y2, stride, cfg.HEATMAP_THRES)
-            paf_mask[2*idx] = 1
-            paf_mask[2*idx + 1] = 1
-    # result
-    return heatmap.astype('float32'), paf.astype('float32'), heatmap_mask.astype('float32'), paf_mask.astype('float32')
-
-
-def get_label_v3(height, width, category, kps):
-    strides = [4, 8, 16]
-    sigmas = [7, 7, 7]
-    heatmaps, masks = [], []
-    for stride, sigma in zip(strides, sigmas):
-        # heatmap and mask
-        landmark_idx = cfg.LANDMARK_IDX[category]
-        num_kps = len(kps)
-        h, w = height // stride, width // stride
-        heatmap = np.zeros((num_kps + 1, h, w))
-        mask = np.zeros_like(heatmap)
-        for i, (x, y, v) in enumerate(kps):
-            if i in landmark_idx and v != -1:
-                mask[i] = 1
-                putGaussianMaps(heatmap[i], mask[i], x, y, v, stride, sigma)
-        heatmap[-1] = heatmap[::-1].max(axis=0)
-        mask[-1] = 1
-        heatmaps.append(heatmap.astype('float32'))
-        masks.append(mask.astype('float32'))
-    # result
-    return heatmaps, masks
-
-
-def get_border(shape, kps, expand=0):
-    h, w = shape
-    keep = kps[:, 2] != -1
-    xmin = kps[keep, 0].min()
-    xmax = kps[keep, 0].max()
-    ymin = kps[keep, 1].min()
-    ymax = kps[keep, 1].max()
-    bh, bw = ymax - ymin, xmax - xmin
-    xmin -= expand * bw
-    xmax += expand * bw
-    ymin -= expand * bh
-    ymax += expand * bh
-    xmin = max(min(int(xmin), w), 0)
-    xmax = max(min(int(xmax), w), 0)
-    ymin = max(min(int(ymin), h), 0)
-    ymax = max(min(int(ymax), h), 0)
-    return (xmin, ymin, xmax, ymax)
-
-
-def get_label_v4(height, width, category, kps):
-    stride = 8
-    sigma = 7
-    # heatmap and mask
-    landmark_idx = cfg.LANDMARK_IDX[category]
-    num_kps = len(kps)
-    h, w = height // stride, width // stride
-    heatmap = np.zeros((num_kps + 1, h, w))
-    heatmap_mask = np.zeros_like(heatmap)
-    for i, (x, y, v) in enumerate(kps):
-        if i in landmark_idx and v != -1:
-            heatmap_mask[i] = 1
-            putGaussianMaps(heatmap[i], heatmap_mask[i], x, y, v, stride, sigma)
-    heatmap[-1] = heatmap[::-1].max(axis=0)
-    heatmap_mask[-1] = 1
-    # obj and mask
-    obj = np.zeros((5, h, w))
-    obj_mask = np.zeros_like(obj)
-    cate_idx = cfg.CATEGORY.index(category)
-    xmin, ymin, xmax, ymax = get_border((height, width), kps, expand=0.1)
-    xmin = xmin // stride
-    ymin = ymin // stride
-    xmax = xmax // stride + 1
-    ymax = ymax // stride + 1
-    obj[cate_idx, ymin: ymax, xmin: xmax] = 1
-    obj_mask[cate_idx] = 1
-    # result
-    return heatmap.astype('float32'), heatmap_mask.astype('float32'), obj.astype('float32'), obj_mask.astype('float32')
 
 
 class FashionAIKPSDataSet(gl.data.Dataset):

@@ -71,78 +71,73 @@ class KpsPafBlock(gl.HybridBlock):
     def __init__(self, num_kps, num_limb, num_channel=128):
         super(KpsPafBlock, self).__init__()
         with self.name_scope():
-            self.body = nn.HybridSequential()
-            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
             self.kps = nn.HybridSequential()
             self.kps.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
             self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
             self.paf = nn.HybridSequential()
             self.paf.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.paf.add(nn.Conv2D(num_limb, kernel_size=1))
+            self.paf.add(nn.Conv2D(2*num_limb, kernel_size=1))
 
     def hybrid_forward(self, F, x):
-        x = self.body(x)
-        kps = self.kps(x)
+        ht = self.kps(x)
         paf = self.paf(x)
-        return kps, paf
+        return ht, paf
+
+
+class UpSamplingBlock(gl.HybridBlock):
+
+    def __init__(self, num_channel, scale):
+        super(UpSamplingBlock, self).__init__()
+        with self.name_scope():
+            self.body = nn.Conv2DTranspose(num_channel, kernel_size=2*scale, strides=scale, padding=scale//2,
+                                           use_bias=False, groups=num_channel, weight_initializer=mx.init.Bilinear())
+            self.body.collect_params().setattr('lr_mult', 0)
+
+    def hybrid_forward(self, F, x):
+        return self.body(x)
 
 
 ##### model for version 2
 
 class CPMBlock(gl.HybridBlock):
 
-    def __init__(self, num_output, channels, ks=[3, 3, 3, 1, 1]):
+    def __init__(self, num_kps, num_limb, num_channel=128, num_context=2):
         super(CPMBlock, self).__init__()
         with self.name_scope():
-            self.net = nn.HybridSequential()
-            for k in ks[:-1]:
-                self.net.add(nn.Conv2D(channels, k, 1, k // 2, activation='relu'))
-            self.net.add(nn.Conv2D(num_output, ks[-1], 1, ks[-1] // 2))
-            for conv in self.net:
-                conv.weight.lr_mult = 4
-                conv.bias.lr_mult = 8
-                #conv.weight.wd_mult = 4
+            self.body = nn.HybridSequential()
+            for _ in range(num_context):
+                self.body.add(ContextBlock(num_channel))
+            self.out = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
-        return self.net(x)
+        x = self.body(x)
+        ht, paf = self.out(x)
+        return x, ht, paf
 
 
 class PoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, stages, channels):
-        super(PoseNet, self).__init__()
+    def __init__(self, num_kps, num_limb, num_stage, num_channel):
+        super(PoseNet, self).__init__(prefix='posenet')
+        self.num_stage = num_stage
         with self.name_scope():
             # backbone
             self.backbone = None
             # feature transfer
-            self.feature_trans = nn.HybridSequential()
-            self.feature_trans.add(nn.Conv2D(2*channels, 3, 1, 1, activation='relu'),
-                                   nn.Conv2D(channels, 3, 1, 1, activation='relu'))
+            self.feat_trans = nn.Conv2D(num_channel, 3, 1, 1, activation='relu')
             # cpm
-            self.stages = stages
-            self.kps_cpm = nn.HybridSequential()
-            self.limb_cpm = nn.HybridSequential()
-            ks1 = [3, 3, 3, 1, 1]
-            ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
-            self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks1))
-            for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
-                self.limb_cpm.add(CPMBlock(2*num_limb, channels, ks2))
+            self.cpm = nn.HybridSequential()
+            num_context = [1, 2, 3, 3, 3]
+            for i in range(num_stage):
+                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_context[i]))
 
     def hybrid_forward(self, F, x):
         feat = self.backbone(x)  # pylint: disable=not-callable
-        feat = self.feature_trans(feat)
-        out = feat
+        feat = self.feat_trans(feat)
         outs = []
-        for i in range(self.stages):
-            out1 = self.kps_cpm[i](out)
-            out2 = self.limb_cpm[i](out)
-            outs.append([out1, out2])
-            # out1 = F.stop_gradient(out1)
-            # out2 = F.stop_gradient(out2)
-            out = F.concat(feat, out1, out2)
+        for i in range(self.num_stage):
+            feat, ht, paf = self.cpm[i](feat)
+            outs.append([ht, paf])
         return outs
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
@@ -160,138 +155,84 @@ class PoseNet(gl.HybridBlock):
         heatmap = out[-1][0][0].asnumpy().astype('float64')
         paf = out[-1][1][0].asnumpy().astype('float64')
         if flip:
-            # heatmap
             heatmap_flip = out[-1][0][1].asnumpy().astype('float64')
-            heatmap_flip = heatmap_flip[:, :, ::-1]
-            for i, j in cfg.LANDMARK_SWAP:
-                tmp = heatmap_flip[i].copy()
-                heatmap_flip[i] = heatmap_flip[j]
-                heatmap_flip[j] = tmp
-            heatmap = (heatmap + heatmap_flip) / 2
-            # paf
             paf_flip = out[-1][1][1].asnumpy().astype('float64')
-            paf_flip = paf_flip[:, :, ::-1]
-
-            def get_flip_idx(p):
-                for px, py in cfg.LANDMARK_SWAP:
-                    if px == p:
-                        return py
-                    if py == p:
-                        return px
-                return p
-
-            num = len(cfg.PAF_LANDMARK_PAIR)
-            for i in range(num):
-                p1, p2 = cfg.PAF_LANDMARK_PAIR[i]
-                p1, p2 = get_flip_idx(p1), get_flip_idx(p2)
-                for j in range(i, num):
-                    p3, p4 = cfg.PAF_LANDMARK_PAIR[j]
-                    if p1 == p3 and p2 == p4:
-                        tmp = paf_flip[2*i: 2*i+2].copy()
-                        paf_flip[2*i: 2*i+2] = paf_flip[2*j: 2*j+2]
-                        paf_flip[2*j: 2*j+2] = tmp
-                        paf_flip[2*i] *= -1  # flip x
-                        paf_flip[2*j] *= -1
-                    elif p1 == p4 and p2 == p3:
-                        assert i == j
-                        paf_flip[2*i+1] *= -1  # flip y
-            paf = (paf + paf_flip) / 2
-
+            heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
 
 
 ##### model for version 3
 
-class UpSampling(gl.HybridBlock):
-
-    def __init__(self, num_channel, scale):
-        super(UpSampling, self).__init__()
-        with self.name_scope():
-            self.body = nn.Conv2DTranspose(num_channel, kernel_size=2*scale, strides=scale, padding=scale//2,
-                                           use_bias=False, groups=num_channel, weight_initializer=mx.init.Bilinear())
-            self.body.collect_params().setattr('lr_mult', 0)
-
-    def hybrid_forward(self, F, x):
-        return self.body(x)
-
-
 class CPNGlobalBlock(gl.HybridBlock):
 
-    def __init__(self, num_output, num_channel):
+    def __init__(self, num_kps, num_limb, num_channel):
         super(CPNGlobalBlock, self).__init__()
-        self.num_output = num_output
-        self.num_channel = num_channel
         with self.name_scope():
-            self.P4 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')   # 1/4
-            self.P8 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')   # 1/8
-            self.P16 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')  # 1/16
-            self.UpSampling = UpSampling(num_channel, 2)
-            self.T8 = nn.Conv2D(num_channel, 1, 1, 0)  # 1/16 -> 1/8
-            self.T4 = nn.Conv2D(num_channel, 1, 1, 0)  # 1/8 -> 1/4
+            self.P4 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')   # 1/4
+            self.P8 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')   # 1/8
+            self.P16 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')  # 1/16
+            self.upx2 = UpSamplingBlock(num_channel, 2)
+            self.T8 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')  # 1/16 -> 1/8
+            self.T4 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')  # 1/8 -> 1/4
             self.Pre4 = nn.HybridSequential()
-            self.Pre4.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.Pre4.add(nn.Conv2D(num_output, kernel_size=3, padding=1))
+            self.Pre4.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
             self.Pre8 = nn.HybridSequential()
-            self.Pre8.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.Pre8.add(nn.Conv2D(num_output, kernel_size=3, padding=1))
+            self.Pre8.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
             self.Pre16 = nn.HybridSequential()
-            self.Pre16.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.Pre16.add(nn.Conv2D(num_output, kernel_size=3, padding=1))
+            self.Pre16.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
 
-    def hybrid_forward(self, F, x4, x8, x16):
-        F4 = self.P4(x4)
-        F8 = self.P8(x8)
-        F16 = self.P16(x16)
+    def hybrid_forward(self, F, f4, f8, f16):
+        f4 = self.P4(f4)
+        f8 = self.P8(f8)
+        f16 = self.P16(f16)
         # 1/16
-        R16 = self.Pre16(F16)
+        ht16, paf16 = self.Pre16(f16)
         # 1/8
-        U8 = self.UpSampling(F16)
-        U8 = F.Crop(U8, F8)
-        F8 = F8 + self.T8(U8)
-        R8 = self.Pre8(F8)
+        u8 = F.Crop(self.upx2(f16), f8)
+        f8 = f8 + self.T8(u8)
+        ht8, paf8 = self.Pre8(f8)
         # 1/4
-        U4 = self.UpSampling(F8)
-        U4 = F.Crop(U4, F4)
-        F4 = F4 + self.T4(U4)
-        R4 = self.Pre4(F4)
-        return F4, F8, F16, R4, R8, R16
+        u4 = F.Crop(self.upx2(f8), f4)
+        f4 = f4 + self.T4(u4)
+        ht4, paf4 = self.Pre4(f4)
+        return f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16
 
 
 class CPNRefineBlock(gl.HybridBlock):
 
-    def __init__(self, num_output, num_channel):
+    def __init__(self, num_kps, num_limb, num_channel):
         super(CPNRefineBlock, self).__init__()
         with self.name_scope():
-            self.feat_trans = nn.HybridSequential()
-            ks = [7, 7, 7, 7, 7]
-            for k in ks:
-                self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
-            self.heat_pred = nn.HybridSequential()
-            self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_output, 3, 1, 1))
+            self.upx2 = UpSamplingBlock(num_channel, 2)
+            self.upx4 = UpSamplingBlock(num_channel, 4)
+            self.feat_trans = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.pred = nn.HybridSequential()
+            self.pred.add(ContextBlock(num_channel), ContextBlock(num_channel))
+            self.pred.add(KpsPafBlock(num_kps, num_limb, num_channel))
 
-    def hybrid_forward(self, F, x):
-        feat = self.feat_trans(x)
-        out = self.heat_pred(feat)
-        return out
+    def hybrid_forward(self, F, f4, f8, f16):
+        u8 = F.Crop(self.upx2(f8), f4)
+        u16 = F.Crop(self.upx4(f16), f4)
+        x = F.concat(f4, u8, u16)
+        x = self.feat_trans(x)
+        ht, paf = self.pred(x)
+        return ht, paf
 
 
 class CascadePoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_channel):
-        super(CascadePoseNet, self).__init__()
-        self.num_kps = num_kps
-        self.num_channel = num_channel
+    def __init__(self, num_kps, num_limb, num_channel):
+        super(CascadePoseNet, self).__init__(prefix='cpn')
         with self.name_scope():
             self.backbone = None
-            self.global_net = CPNGlobalBlock(self.num_kps, self.num_channel)
-            self.refine_net = CPNRefineBlock(self.num_kps, self.num_channel)
+            self.global_net = CPNGlobalBlock(num_kps, num_limb, num_channel)
+            self.refine_net = CPNRefineBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
         feats = self.backbone(x)  # pylint: disable=not-callable
-        F4, F8, F16, R4, R8, R16 = self.global_net(*feats)
-        refine_pred = self.refine_net(F.concat(F4, R4))
-        return [R4, R8, R16], refine_pred
+        f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16 = self.global_net(*feats)
+        r_ht, r_paf = self.refine_net(f4, f8, f16)
+        return (ht4, paf4, ht8, paf8, ht16, paf16), (r_ht, r_paf)
 
     def init_backbone(self, creator, featnames, fixed, pretrained=True):
         assert len(featnames) == 3
@@ -305,17 +246,14 @@ class CascadePoseNet(gl.HybridBlock):
         else:
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        _, refine_pred = self(batch)
-        heatmap = refine_pred[0].asnumpy().astype('float64')
+        _, out = self(batch)
+        heatmap = out[0][0].asnumpy().astype('float64')
+        paf = out[1][0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = refine_pred[1].asnumpy().astype('float64')
-            heatmap_flip = heatmap_flip[:, :, ::-1]
-            for i, j in cfg.LANDMARK_SWAP:
-                tmp = heatmap_flip[i].copy()
-                heatmap_flip[i] = heatmap_flip[j]
-                heatmap_flip[j] = tmp
-            heatmap = (heatmap + heatmap_flip) / 2
-        return heatmap
+            heatmap_flip = out[0][1].asnumpy().astype('float64')
+            paf_flip = out[1][1].asnumpy().astype('float64')
+            heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
+        return heatmap, paf
 
 
 ##### model for version 4
@@ -400,65 +338,6 @@ class MaskPoseNet(gl.HybridBlock):
         return mask, heatmap
 
 
-##### model for version 5
-
-class PoseNetNoPaf(gl.HybridBlock):
-
-    def __init__(self, num_kps, stages, channels):
-        super(PoseNetNoPaf, self).__init__()
-        with self.name_scope():
-            # backbone
-            self.backbone = None
-            # feature transfer
-            self.feature_trans = nn.HybridSequential()
-            self.feature_trans.add(nn.Conv2D(2*channels, 3, 1, 1, activation='relu'),
-                                   nn.Conv2D(channels, 3, 1, 1, activation='relu'))
-            # cpm
-            self.stages = stages
-            self.kps_cpm = nn.HybridSequential()
-            ks1 = [3, 3, 3, 1, 1]
-            ks2 = [7, 7, 7, 7, 7, 1, 1]
-            self.kps_cpm.add(CPMBlock(num_kps, channels, ks1))
-            for _ in range(1, stages):
-                self.kps_cpm.add(CPMBlock(num_kps, channels, ks2))
-
-    def hybrid_forward(self, F, x):
-        feat = self.backbone(x)  # pylint: disable=not-callable
-        feat = self.feature_trans(feat)
-        out = feat
-        outs = []
-        for i in range(self.stages):
-            out = self.kps_cpm[i](out)
-            outs.append(out)
-            out = F.concat(feat, out)
-        return outs
-
-    def init_backbone(self, creator, featname, fixed, pretrained=True):
-        install_backbone(self, creator, [featname], fixed, pretrained)
-
-    def predict(self, img, ctx, flip=True):
-        data = process_cv_img(img)
-        if flip:
-            data_flip = data[:, :, ::-1]
-            data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
-        else:
-            data = data[np.newaxis]
-        batch = mx.nd.array(data, ctx=ctx)
-        out = self(batch)
-        heatmap = out[-1][0].asnumpy().astype('float64')
-        if flip:
-            # heatmap
-            heatmap_flip = out[-1][1].asnumpy().astype('float64')
-            heatmap_flip = heatmap_flip[:, :, ::-1]
-            for i, j in cfg.LANDMARK_SWAP:
-                tmp = heatmap_flip[i].copy()
-                heatmap_flip[i] = heatmap_flip[j]
-                heatmap_flip[j] = tmp
-            heatmap = (heatmap + heatmap_flip) / 2
-
-        return heatmap
-
-
 ##### detection model
 
 class GConv(gl.HybridBlock):
@@ -486,7 +365,7 @@ class FPN(gl.HybridBlock):
         with self.name_scope():
             self.P8 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
             self.P16 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
-            self.up = UpSampling(num_channel, 2)
+            self.up = UpSamplingBlock(num_channel, 2)
 
     def hybrid_forward(self, F, f8, f16):
         f8 = self.P8(f8)
@@ -555,6 +434,44 @@ class DetNet(gl.HybridBlock):
 
 ##### Utils
 
+def flip_prediction(ht, ht_flip, paf, paf_flip):
+    # heatmap
+    ht_flip = ht_flip[:, :, ::-1]
+    for i, j in cfg.LANDMARK_SWAP:
+        tmp = ht_flip[i].copy()
+        ht_flip[i] = ht_flip[j]
+        ht_flip[j] = tmp
+    ht = (ht + ht_flip) / 2
+    # paf
+    paf_flip = paf_flip[:, :, ::-1]
+
+    def get_flip_idx(p):
+        for px, py in cfg.LANDMARK_SWAP:
+            if px == p:
+                return py
+            if py == p:
+                return px
+        return p
+
+    num = len(cfg.PAF_LANDMARK_PAIR)
+    for i in range(num):
+        p1, p2 = cfg.PAF_LANDMARK_PAIR[i]
+        p1, p2 = get_flip_idx(p1), get_flip_idx(p2)
+        for j in range(i, num):
+            p3, p4 = cfg.PAF_LANDMARK_PAIR[j]
+            if p1 == p3 and p2 == p4:
+                tmp = paf_flip[2*i: 2*i+2].copy()
+                paf_flip[2*i: 2*i+2] = paf_flip[2*j: 2*j+2]
+                paf_flip[2*j: 2*j+2] = tmp
+                paf_flip[2*i] *= -1  # flip x
+                paf_flip[2*j] *= -1
+            elif p1 == p4 and p2 == p3:
+                assert i == j
+                paf_flip[2*i+1] *= -1  # flip y
+    paf = (paf + paf_flip) / 2
+    return ht, paf
+
+
 def parse_from_name_v2(name):
     # name = /path/to/V2.default-vgg16-S5-C64-BS16-adam-0100.params
     name = os.path.basename(name)
@@ -588,8 +505,8 @@ def load_model(model, version=2):
     num_kps = cfg.NUM_LANDMARK
     num_limb = len(cfg.PAF_LANDMARK_PAIR)
     if version == 2:
-        prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
-        net = PoseNet(num_kps=num_kps, num_limb=num_limb, stages=cpm_stages, channels=cpm_channels)
+        prefix, backbone, num_stage, num_channel, batch_size, optim, epoch = parse_from_name_v2(model)
+        net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v2[backbone]
     elif version == 3:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
@@ -599,10 +516,6 @@ def load_model(model, version=2):
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v4[backbone]
-    elif version == 5:
-        prefix, backbone, cpm_stages, cpm_channels, batch_size, optim, epoch = parse_from_name_v2(model)
-        net = PoseNetNoPaf(num_kps=num_kps, stages=cpm_stages, channels=cpm_channels)
-        creator, featname, fixed = cfg.BACKBONE_v2[backbone]
     else:
         raise RuntimeError('no such version %d'%version)
     net.init_backbone(creator, featname, fixed, pretrained=False)
@@ -659,10 +572,6 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
             heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
             mask = mask + mask_
             heatmap = heatmap + heatmap_
-        elif version == 5:
-            heatmap_ = net.predict(img_, ctx)
-            heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-            heatmap = heatmap + heatmap_
         else:
             raise RuntimeError('no such version %d'%version)
     if version == 2:
@@ -676,8 +585,5 @@ def multi_scale_predict(net, ctx, version, img, category, multi_scale=False):
         mask /= len(scales)
         heatmap /= len(scales)
         return mask, heatmap
-    elif version == 5:
-        heatmap /= len(scales)
-        return heatmap
     else:
         raise RuntimeError('no such version %d'%version)

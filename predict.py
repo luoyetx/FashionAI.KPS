@@ -48,9 +48,6 @@ def work_func(df, idx, args):
             kps_pred = detect_kps_v3(img, heatmap, category)
         elif version == 4:
             pass
-        elif version == 5:
-            heatmap = multi_scale_predict(net, ctx, version, img, category, multi_scale)
-            kps_pred = detect_kps_v3(img, heatmap, category)
         else:
             raise RuntimeError('no such version %d'%version)
         result.append(kps_pred)
