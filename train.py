@@ -172,7 +172,7 @@ def main():
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')
     parser.add_argument('--lr-decay', type=float, default=0.1)
-    parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg16', 'vgg19', 'resnet50'])
+    parser.add_argument('--backbone', type=str, default='vgg19', choices=['vgg19', 'resnet50'])
     parser.add_argument('--model-path', type=str, default='')
     parser.add_argument('--prefix', type=str, default='default', help='model description')
     parser.add_argument('--version', type=int, default=2, choices=[2, 3, 4], help='model version')

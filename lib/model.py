@@ -6,6 +6,7 @@ import numpy as np
 import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
+from mxnet.gluon.model_zoo.vision.resnet import BottleneckV1
 
 from lib.config import cfg
 from lib.utils import process_cv_img
@@ -37,7 +38,7 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
                 print('fix parameter', key)
                 item.grad_req = 'null'
         # special for batchnorm
-        freeze_bn(backbone.features)
+        # freeze_bn(backbone.features)
         # create symbol
         data = mx.sym.var('data')
         out_names = ['_'.join([backbone.name, featname, 'output']) for featname in featnames]
@@ -46,16 +47,31 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
         net.backbone = gl.SymbolBlock(outs, data, params=backbone.collect_params())
 
 
+class ConvBnReLU(gl.HybridBlock):
+
+    def __init__(self, num_channel):
+        super(ConvBnReLU, self).__init__()
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, use_bias=False))
+            self.body.add(nn.BatchNorm())
+            self.body.add(nn.Activation('relu'))
+
+    def hybrid_forward(self, F, x):
+        x = self.body(x)
+        return x
+
+
 class ContextBlock(gl.HybridBlock):
 
-    def __init__(self, num_channel=128):
+    def __init__(self, num_channel):
         super(ContextBlock, self).__init__()
         with self.name_scope():
-            self.conv1 = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
-            self.conv2 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
-            self.conv3 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
-            self.conv4_1 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
-            self.conv4_2 = nn.Conv2D(num_channel // 2, kernel_size=3, padding=1, activation='relu')
+            self.conv1 = ConvBnReLU(num_channel)
+            self.conv2 = ConvBnReLU(num_channel // 2)
+            self.conv3 = ConvBnReLU(num_channel // 2)
+            self.conv4_1 = ConvBnReLU(num_channel // 2)
+            self.conv4_2 = ConvBnReLU(num_channel // 2)
 
     def hybrid_forward(self, F, x):
         x1 = self.conv1(x)
@@ -68,9 +84,10 @@ class ContextBlock(gl.HybridBlock):
 
 class KpsPafBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_channel=128):
+    def __init__(self, num_kps, num_limb, num_channel):
         super(KpsPafBlock, self).__init__()
         with self.name_scope():
+            self.context = ContextBlock(num_channel)
             self.kps = nn.HybridSequential()
             self.kps.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
             self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
@@ -79,6 +96,7 @@ class KpsPafBlock(gl.HybridBlock):
             self.paf.add(nn.Conv2D(num_limb, kernel_size=1))
 
     def hybrid_forward(self, F, x):
+        x = self.context(x)
         ht = self.kps(x)
         paf = self.paf(x)
         return ht, paf
@@ -101,12 +119,13 @@ class UpSamplingBlock(gl.HybridBlock):
 
 class CPMBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_channel=128, num_context=2):
+    def __init__(self, num_kps, num_limb, num_channel, num_bottleneck):
         super(CPMBlock, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
-            for _ in range(num_context):
-                self.body.add(ContextBlock(num_channel))
+            self.body.add(ConvBnReLU(256))  # reduce channel
+            for _ in range(num_bottleneck):
+                self.body.add(BottleneckV1(channels=256, stride=1))
             self.out = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
@@ -124,19 +143,21 @@ class PoseNet(gl.HybridBlock):
             # backbone
             self.backbone = None
             # feature transfer
-            self.feat_trans = nn.Conv2D(num_channel, 3, 1, 1, activation='relu')
+            self.feat_trans = ConvBnReLU(num_channel)
             # cpm
             self.cpm = nn.HybridSequential()
-            num_context = [2, 2, 2, 2, 2]
+            num_bottleneck = [3, 3, 3, 3, 3]
             for i in range(num_stage):
-                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_context[i]))
+                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_bottleneck[i]))
 
     def hybrid_forward(self, F, x):
-        feat = self.backbone(x)  # pylint: disable=not-callable
-        feat = self.feat_trans(feat)
+        x = self.backbone(x)  # pylint: disable=not-callable
+        x = self.feat_trans(x)
+        feat = x
         outs = []
         for i in range(self.num_stage):
             feat, ht, paf = self.cpm[i](feat)
+            feat = F.concat(feat, x)
             outs.append([ht, paf])
         return outs
 
@@ -174,12 +195,9 @@ class CPNGlobalBlock(gl.HybridBlock):
             self.upx2 = UpSamplingBlock(num_channel, 2)
             self.T8 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')  # 1/16 -> 1/8
             self.T4 = nn.Conv2D(num_channel, kernel_size=1, activation='relu')  # 1/8 -> 1/4
-            self.Pre4 = nn.HybridSequential()
-            self.Pre4.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
-            self.Pre8 = nn.HybridSequential()
-            self.Pre8.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
-            self.Pre16 = nn.HybridSequential()
-            self.Pre16.add(ContextBlock(num_channel), KpsPafBlock(num_kps, num_limb, num_channel))
+            self.Pre4 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.Pre8 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.Pre16 = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, f4, f8, f16):
         f4 = self.P4(f4)
@@ -205,10 +223,8 @@ class CPNRefineBlock(gl.HybridBlock):
         with self.name_scope():
             self.upx2 = UpSamplingBlock(num_channel, 2)
             self.upx4 = UpSamplingBlock(num_channel, 4)
-            self.feat_trans = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
-            self.pred = nn.HybridSequential()
-            self.pred.add(ContextBlock(num_channel), ContextBlock(num_channel))
-            self.pred.add(KpsPafBlock(num_kps, num_limb, num_channel))
+            self.feat_trans = ConvBnReLU(num_channel)
+            self.pred = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, f4, f8, f16):
         u8 = F.Crop(self.upx2(f8), f4)

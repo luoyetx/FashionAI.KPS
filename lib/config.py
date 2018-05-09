@@ -24,8 +24,8 @@ cfg.PAF_LANDMARK_PAIR = [(0, 1), (0, 2), (0, 3),
                          (4, 6), (4, 12),
                          (5, 6), (5, 7), (5, 9), (5, 13),
                          (6, 8), (6, 11), (6, 14),
-                         (7, 8), (7, 13),
-                         (8, 14),
+                         (7, 8), (7, 13), (7, 17),
+                         (8, 14), (8, 18),
                          (9, 10),
                          (11, 12),
                          (13, 14),
@@ -59,13 +59,12 @@ cfg.PIXEL_MEAN = [0.485, 0.456, 0.406]  # RGB
 cfg.PIXEL_STD = [0.229, 0.224, 0.225]
 
 cfg.BACKBONE_v2 = {
-    'vgg16': (gl.model_zoo.vision.vgg16, 'relu8_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
     'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage2_activation3', ['conv0']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage2_activation3', []),
 }
 
 cfg.BACKBONE_v3 = {
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage1_activation2', 'stage2_activation3', 'stage3_activation5'], ['conv0']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage1_activation2', 'stage2_activation3', 'stage3_activation5'], []),
 }
 
 cfg.BACKBONE_v4 = {
@@ -74,7 +73,7 @@ cfg.BACKBONE_v4 = {
 }
 
 cfg.BACKBONE_Det = {
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage2_activation3', 'stage3_activation5'], ['conv0']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage2_activation3', 'stage3_activation5'], []),
 }
 
 cfg.EVAL_NORMAL_IDX = {
