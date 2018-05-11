@@ -64,12 +64,7 @@ cfg.BACKBONE_v2 = {
 }
 
 cfg.BACKBONE_v3 = {
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage1_activation2', 'stage2_activation3', 'stage3_activation5'], []),
-}
-
-cfg.BACKBONE_v4 = {
-    'vgg19': (gl.model_zoo.vision.vgg19, 'relu9_fwd', ['conv0', 'conv1', 'conv2', 'conv3']),
-    'resnet50': (gl.model_zoo.vision.resnet50_v1, 'stage2_activation3', ['conv0']),
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage1_activation2', 'stage2_activation3'], []),
 }
 
 cfg.BACKBONE_Det = {

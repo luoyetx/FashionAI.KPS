@@ -6,7 +6,6 @@ import numpy as np
 import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
-from mxnet.gluon.model_zoo.vision.resnet import BottleneckV1
 
 from lib.config import cfg
 from lib.utils import process_cv_img
@@ -49,11 +48,11 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
 
 class ConvBnReLU(gl.HybridBlock):
 
-    def __init__(self, num_channel):
+    def __init__(self, num_channel, kernel_size=3, padding=1):
         super(ConvBnReLU, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
-            self.body.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, use_bias=False))
+            self.body.add(nn.Conv2D(num_channel, kernel_size=kernel_size, padding=padding, use_bias=False))
             self.body.add(nn.BatchNorm())
             self.body.add(nn.Activation('relu'))
 
@@ -67,18 +66,17 @@ class ContextBlock(gl.HybridBlock):
     def __init__(self, num_channel):
         super(ContextBlock, self).__init__()
         with self.name_scope():
-            self.conv1 = ConvBnReLU(num_channel)
-            self.conv2 = ConvBnReLU(num_channel // 2)
-            self.conv3 = ConvBnReLU(num_channel // 2)
-            self.conv4_1 = ConvBnReLU(num_channel // 2)
-            self.conv4_2 = ConvBnReLU(num_channel // 2)
+            self.f3 = ConvBnReLU(num_channel)
+            self.f5 = nn.HybridSequential()
+            self.f5.add(ConvBnReLU(num_channel), ConvBnReLU(num_channel))
+            self.f7 = nn.HybridSequential()
+            self.f7.add(ConvBnReLU(num_channel), ConvBnReLU(num_channel), ConvBnReLU(num_channel))
 
     def hybrid_forward(self, F, x):
-        x1 = self.conv1(x)
-        x2 = self.conv2(x)
-        x3 = self.conv3(x2)
-        x4 = self.conv4_2(self.conv4_1(x2))
-        out = F.concat(x1, x3, x4)
+        f3 = self.f3(x)
+        f5 = self.f5(x)
+        f7 = self.f7(x)
+        out = F.concat(f3, f5, f7)
         return out
 
 
@@ -87,7 +85,6 @@ class KpsPafBlock(gl.HybridBlock):
     def __init__(self, num_kps, num_limb, num_channel):
         super(KpsPafBlock, self).__init__()
         with self.name_scope():
-            self.context = ContextBlock(num_channel)
             self.kps = nn.HybridSequential()
             self.kps.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
             self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
@@ -96,36 +93,21 @@ class KpsPafBlock(gl.HybridBlock):
             self.paf.add(nn.Conv2D(num_limb, kernel_size=1))
 
     def hybrid_forward(self, F, x):
-        x = self.context(x)
         ht = self.kps(x)
         paf = self.paf(x)
         return ht, paf
-
-
-class UpSamplingBlock(gl.HybridBlock):
-
-    def __init__(self, num_channel, scale):
-        super(UpSamplingBlock, self).__init__()
-        with self.name_scope():
-            self.body = nn.Conv2DTranspose(num_channel, kernel_size=2*scale, strides=scale, padding=scale//2,
-                                           use_bias=False, groups=num_channel, weight_initializer=mx.init.Bilinear())
-            self.body.collect_params().setattr('lr_mult', 0)
-
-    def hybrid_forward(self, F, x):
-        return self.body(x)
 
 
 ##### model for version 2
 
 class CPMBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_channel, num_bottleneck):
+    def __init__(self, num_kps, num_limb, num_channel, num_context):
         super(CPMBlock, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
-            self.body.add(ConvBnReLU(256))  # reduce channel
-            for _ in range(num_bottleneck):
-                self.body.add(BottleneckV1(channels=256, stride=1))
+            for _ in range(num_context):
+                self.body.add(ContextBlock(128))
             self.out = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
@@ -143,12 +125,11 @@ class PoseNet(gl.HybridBlock):
             # backbone
             self.backbone = None
             # feature transfer
-            self.feat_trans = ConvBnReLU(num_channel)
+            self.feat_trans = ConvBnReLU(256)
             # cpm
             self.cpm = nn.HybridSequential()
-            num_bottleneck = [3, 3, 3, 3, 3]
-            for i in range(num_stage):
-                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_bottleneck[i]))
+            for _ in range(num_stage):
+                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, 2))
 
     def hybrid_forward(self, F, x):
         x = self.backbone(x)  # pylint: disable=not-callable
@@ -157,8 +138,12 @@ class PoseNet(gl.HybridBlock):
         outs = []
         for i in range(self.num_stage):
             feat, ht, paf = self.cpm[i](feat)
-            feat = F.concat(feat, x)
             outs.append([ht, paf])
+            if i != self.num_stage - 1:
+                feat = F.concat(feat, x)
+                # mask
+                mask = F.exp(F.max(ht, axis=1, keepdims=True))
+                feat = F.broadcast_mul(feat, mask)
         return outs
 
     def init_backbone(self, creator, featname, fixed, pretrained=True):
@@ -173,16 +158,30 @@ class PoseNet(gl.HybridBlock):
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
         out = self(batch)
-        heatmap = out[-1][0][0].asnumpy().astype('float64')
-        paf = out[-1][1][0].asnumpy().astype('float64')
+        idx = -1
+        heatmap = out[idx][0][0].asnumpy().astype('float64')
+        paf = out[idx][1][0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = out[-1][0][1].asnumpy().astype('float64')
-            paf_flip = out[-1][1][1].asnumpy().astype('float64')
+            heatmap_flip = out[idx][0][1].asnumpy().astype('float64')
+            paf_flip = out[idx][1][1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
 
 
 ##### model for version 3
+
+class UpSamplingBlock(gl.HybridBlock):
+
+    def __init__(self, num_channel, scale):
+        super(UpSamplingBlock, self).__init__()
+        with self.name_scope():
+            self.body = nn.Conv2DTranspose(num_channel, kernel_size=2*scale, strides=scale, padding=scale//2,
+                                           use_bias=False, groups=num_channel, weight_initializer=mx.init.Bilinear())
+            self.body.collect_params().setattr('lr_mult', 0)
+
+    def hybrid_forward(self, F, x):
+        return self.body(x)
+
 
 class CPNGlobalBlock(gl.HybridBlock):
 
@@ -270,88 +269,6 @@ class CascadePoseNet(gl.HybridBlock):
             paf_flip = out[1][1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
-
-
-##### model for version 4
-
-class MaskHeatHead(gl.HybridBlock):
-
-    def __init__(self, num_output, num_channel):
-        super(MaskHeatHead, self).__init__()
-        with self.name_scope():
-            self.feat_trans = nn.HybridSequential()
-            ks = [7, 7, 7, 7, 7]
-            for k in ks:
-                self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
-            self.mask_pred = nn.HybridSequential()
-            self.mask_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(5, 3, 1, 1))
-            self.heat_pred = nn.HybridSequential()
-            self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_output, 3, 1, 1))
-
-    def hybrid_forward(self, F, x):
-        feat = self.feat_trans(x)
-        mask = self.mask_pred(feat)
-        mask_to_feat = F.sigmoid(mask)
-        mask_to_feat = F.max(mask_to_feat, axis=1, keepdims=True)
-        mask_to_feat = F.exp(mask_to_feat)
-        mask_to_feat = F.stop_gradient(mask_to_feat)
-        feat = F.broadcast_mul(feat, mask_to_feat)
-        heatmap = self.heat_pred(feat)
-        return feat, mask, mask_to_feat, heatmap
-
-
-class RefineNet(gl.HybridBlock):
-
-    def __init__(self, num_output, num_channel):
-        super(RefineNet, self).__init__()
-        with self.name_scope():
-            self.feat_trans = nn.HybridSequential()
-            ks = [7, 7, 7, 7, 7]
-            for k in ks:
-                self.feat_trans.add(nn.Conv2D(num_channel, k, 1, k // 2, activation='relu'))
-            self.heat_pred = nn.HybridSequential()
-            self.heat_pred.add(nn.Conv2D(num_channel, 3, 1, 1, activation='relu'),
-                               nn.Conv2D(num_output, 3, 1, 1))
-
-    def hybrid_forward(self, F, x, mask_to_feat):
-        feat = self.feat_trans(x)
-        feat = F.broadcast_mul(feat, mask_to_feat)
-        heatmap = self.heat_pred(feat)
-        return heatmap
-
-
-class MaskPoseNet(gl.HybridBlock):
-
-    def __init__(self, num_kps, num_channel):
-        super(MaskPoseNet, self).__init__(prefix='maskpose')
-        with self.name_scope():
-            self.backbone = None
-            self.head = MaskHeatHead(num_kps, num_channel)
-            self.refine = RefineNet(num_kps, num_channel)
-
-    def hybrid_forward(self, F, x):
-        feat = self.backbone(x)  # pylint: disable=not-callable
-        feat_with_mask, mask, mask_to_feat, heatmap = self.head(feat)
-        feat = F.concat(feat, feat_with_mask, heatmap)
-        heatmap_refine = self.refine(feat, mask_to_feat)
-        return mask, heatmap, heatmap_refine
-
-    def init_backbone(self, creator, featname, fixed, pretrained=True):
-        install_backbone(self, creator, [featname], fixed, pretrained)
-
-    def predict(self, img, ctx, flip=True):
-        data = process_cv_img(img)
-        data = data[np.newaxis]
-        batch = mx.nd.array(data, ctx=ctx)
-        mask, _, heatmap = self(batch)
-        mask = nd.sigmoid(mask)
-        heatmap = heatmap[0].asnumpy().astype('float64')
-        mask = mask[0].asnumpy().astype('float64')
-        return mask, heatmap
 
 
 ##### detection model
@@ -506,10 +423,6 @@ def load_model(model, version=2):
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
         net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
         creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-    elif version == 4:
-        prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
-        net = MaskPoseNet(num_kps=num_kps, num_channel=num_channel)
-        creator, featname, fixed = cfg.BACKBONE_v4[backbone]
     else:
         raise RuntimeError('no such version %d'%version)
     net.init_backbone(creator, featname, fixed, pretrained=False)

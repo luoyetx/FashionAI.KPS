@@ -275,3 +275,38 @@ Total Average Error 0.059184
 ```
 
 public 0.0554
+
+- v2.31 V2.mexpo-resnet50-S3-C256-BS24-adam-0055.params, test err 2.086
+
+```
+Average Error for blouse: 0.038934
+Average Error for skirt: 0.034857
+Average Error for outwear: 0.045177
+Average Error for dress: 0.042346
+Average Error for trousers: 0.041467
+Total Average Error 0.041234
+```
+
+```
+Average Error for blouse: 0.037986
+Average Error for skirt: 0.031357
+Average Error for outwear: 0.043468
+Average Error for dress: 0.042158
+Average Error for trousers: 0.038983
+Total Average Error 0.039812
+```
+
+public 0.0397
+
+- v2.32 V2.mexpo-resnet50-S3-C256-BS24-adam-0070.params, test err 2.086
+
+```
+Average Error for blouse: 0.037898
+Average Error for skirt: 0.031830
+Average Error for outwear: 0.043459
+Average Error for dress: 0.041509
+Average Error for trousers: 0.038677
+Total Average Error 0.039627
+```
+
+public

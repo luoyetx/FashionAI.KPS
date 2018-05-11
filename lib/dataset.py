@@ -107,10 +107,11 @@ def get_border(shape, kps, expand=0):
 
 
 def get_label(height, width, category, kps):
-    strides = [4, 8, 16]
-    sigma = 7
+    strides = [4, 8]
+    gks = [7, 3]
+    sigmas = [7, 7]
     hts, pafs, objs, hts_mask, pafs_mask, objs_mask = [], [], [], [], [], []
-    for stride in strides:
+    for stride, gk, sigma in zip(strides, gks, sigmas):
         grid_x = width // stride
         grid_y = height // stride
         # heatmap and mask
@@ -121,7 +122,13 @@ def get_label(height, width, category, kps):
         for i, (x, y, v) in enumerate(kps):
             if i in landmark_idx and v != -1:
                 ht_mask[i] = 1
-                putGaussianMaps(ht[i], ht_mask[i], x, y, v, stride, sigma)
+                #putGaussianMaps(ht[i], x, y, v, stride, sigma)
+                tx, ty = int(x / stride), int(y / stride)
+                if tx >=0 and tx < grid_x and ty >= 0 and ty < grid_y:
+                    ht[i, ty, tx] = 1
+                    ht[i] = cv2.GaussianBlur(ht[i], (gk, gk), 0)
+                    am = ht[i].max()
+                    ht[i] /= am
         # paf and mask
         limb = cfg.PAF_LANDMARK_PAIR
         num_limb = len(limb)
@@ -152,15 +159,15 @@ def get_label(height, width, category, kps):
         objs.append(obj)
         objs_mask.append(obj_mask)
     # result
-    ht4, ht8, ht16 = [_.astype('float32') for _ in hts]
-    ht4_mask, ht8_mask, ht16_mask = [_.astype('float32') for _ in hts_mask]
-    paf4, paf8, paf16 = [_.astype('float32') for _ in pafs]
-    paf4_mask, paf8_mask, paf16_mask = [_.astype('float32') for _ in pafs_mask]
-    obj4, obj8, obj16 = [_.astype('float32') for _ in objs]
-    obj4_mask, obj8_mask, obj16_mask = [_.astype('float32') for _ in objs_mask]
-    return (ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask), \
-           (paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask), \
-           (obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask)
+    ht4, ht8 = [_.astype('float32') for _ in hts]
+    ht4_mask, ht8_mask = [_.astype('float32') for _ in hts_mask]
+    paf4, paf8 = [_.astype('float32') for _ in pafs]
+    paf4_mask, paf8_mask = [_.astype('float32') for _ in pafs_mask]
+    obj4, obj8 = [_.astype('float32') for _ in objs]
+    obj4_mask, obj8_mask = [_.astype('float32') for _ in objs_mask]
+    return (ht4, ht8, ht4_mask, ht8_mask), \
+           (paf4, paf8, paf4_mask, paf8_mask), \
+           (obj4, obj8, obj4_mask, obj8_mask)
 
 
 class FashionAIKPSDataSet(gl.data.Dataset):
@@ -194,12 +201,12 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         self.cur_kps = kps  # for debug and show
         # get label
         A, B, C = get_label(height, width, category, kps)
-        ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask = A
-        paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask = B
-        obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = C
-        return img, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, \
-               paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, \
-               obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask
+        ht4, ht8, ht4_mask, ht8_mask = A
+        paf4, paf8, paf4_mask, paf8_mask = B
+        obj4, obj8, obj4_mask, obj8_mask = C
+        return img, ht4, ht8, ht4_mask, ht8_mask, \
+               paf4, paf8, paf4_mask, paf8_mask, \
+               obj4, obj8, obj4_mask, obj8_mask,
 
     def __len__(self):
         return len(self.img_lst)
@@ -255,25 +262,20 @@ def main():
     print('DataSet Size', len(dataset))
     for idx, pack in enumerate(dataset):
         # unpack
-        data, ht4, ht8, ht16, ht4_mask, ht8_mask, ht16_mask, paf4, paf8, paf16, paf4_mask, paf8_mask, paf16_mask, obj4, obj8, obj16, obj4_mask, obj8_mask, obj16_mask = pack
+        data, ht4, ht8, ht4_mask, ht8_mask, paf4, paf8, paf4_mask, paf8_mask, obj4, obj8, obj4_mask, obj8_mask, = pack
 
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
         category = dataset.category[idx]
 
         cate_idx = cfg.CATEGORY.index(category)
-        dr1 = draw_heatmap(img, ht4.max(axis=0), resize_im=True)
-        dr2 = draw_heatmap(img, ht8.max(axis=0), True)
-        dr3 = draw_heatmap(img, ht16.max(axis=0), True)
-        dr4 = draw_paf(img, paf8)
-        dr5 = draw_heatmap(img, obj8[cate_idx])
-        dr6 = draw_kps(img, kps)
-        cv2.imshow('h4', dr1)
-        cv2.imshow('h8', dr2)
-        cv2.imshow('h16', dr3)
-        cv2.imshow('paf8', dr4)
-        cv2.imshow('obj8', dr5)
-        cv2.imshow("kps", dr6)
+        cv2.imshow('h4', draw_heatmap(img, ht4.max(axis=0), resize_im=True))
+        cv2.imshow('h8', draw_heatmap(img, ht8.max(axis=0), True))
+        cv2.imshow('paf8', draw_paf(img, paf8))
+        cv2.imshow('obj8', draw_heatmap(img, obj8[cate_idx]))
+        cv2.imshow("kps", draw_kps(img, kps))
+        cv2.imshow('o-h4', draw_heatmap(img, ht4.max(axis=0)))
+        cv2.imshow('o-h8', draw_heatmap(img, ht8.max(axis=0)))
 
         key = cv2.waitKey(0)
         if key == 27:

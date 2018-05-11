@@ -5,7 +5,7 @@ cimport numpy as np
 ctypedef np.float_t DTYPE_t
 
 @cython.boundscheck(False)
-def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] heatMap, np.ndarray[DTYPE_t, ndim = 2] mask,
+def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] heatMap,
                     DTYPE_t center_x, DTYPE_t center_y, int visible,
                     int stride, DTYPE_t sigma):
     cdef int height = heatMap.shape[0]
@@ -25,7 +25,6 @@ def putGaussianMaps(np.ndarray[DTYPE_t, ndim = 2] heatMap, np.ndarray[DTYPE_t, n
             if exponent > 4.6052:
                 continue
             heatMap[g_y, g_x] += np.exp(-exponent)
-            #mask[g_y, g_x] = visible
 
 
 @cython.boundscheck(False)
