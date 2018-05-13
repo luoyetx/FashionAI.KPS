@@ -16,8 +16,8 @@ import pandas as pd
 from tensorboardX import SummaryWriter
 
 from lib.config import cfg
-from lib.dataset import FashionAIKPSDataSet
-from lib.model import PoseNet, CascadePoseNet, load_model
+from lib.dataset import FashionAIKPSDataSet, FashionAIPatchDataSet
+from lib.model import PoseNet, CascadePoseNet, load_model, PatchRefineNet
 from lib.utils import get_logger, Recorder
 
 
@@ -103,6 +103,26 @@ def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
     return losses
 
 
+def forward_backward(net, criterion, ctx, packet, is_train=True):
+    data, offset, mask = packet
+    data = gl.utils.split_and_load(data, ctx)
+    offset = gl.utils.split_and_load(offset, ctx)
+    mask = gl.utils.split_and_load(mask, ctx)
+    # run
+    ag.set_recording(is_train)
+    ag.set_training(is_train)
+    losses = []
+    for data_, offset_, mask_ in zip(data, offset, mask):
+        pred_ = net(data_)
+        losses_ = [criterion(offset_, pred_, mask_)]
+        losses.append(losses_)
+        if is_train:
+            ag.backward(losses_)
+    ag.set_recording(False)
+    ag.set_training(False)
+    return losses
+
+
 def reduce_losses(losses):
     n = len(losses)
     m = len(losses[0])
@@ -147,47 +167,22 @@ def main():
     freq = args.freq
     steps = [int(x) for x in args.steps.split(',')]
     lr_decay = args.lr_decay
-    backbone = args.backbone
-    prefix = args.prefix
-    model_path = None if args.model_path == '' else args.model_path
-    num_stage = args.num_stage
-    num_channel = args.num_channel
-    version = args.version
-    if version == 2:
-        base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
-    elif version == 3:
-        base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
-    else:
-        raise RuntimeError('no such version %d'%version)
-    filename = './tmp/%s.log' % base_name
+    base_name = 'refine'
+    filename = './tmp/refine.log'
     logger = get_logger(fn=filename)
     logger.info(args)
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    traindata = FashionAIKPSDataSet(df_train, is_train=True)
-    testdata = FashionAIKPSDataSet(df_test, is_train=False)
+    traindata = FashionAIPatchDataSet(df_train, is_train=True)
+    testdata = FashionAIPatchDataSet(df_test, is_train=False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
     # model
-    if not model_path:
-        num_kps = cfg.NUM_LANDMARK
-        num_limb = len(cfg.PAF_LANDMARK_PAIR)
-        if version == 2:
-            net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
-            creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-        elif version == 3:
-            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
-            creator, featname, fixed = cfg.BACKBONE_v3[backbone]
-        else:
-            raise RuntimeError('no such version %d'%version)
-        net.init_backbone(creator, featname, fixed, pretrained=True)
-        net.initialize(mx.init.Normal(), ctx=ctx)
-    else:
-        logger.info('Load net from %s', model_path)
-        net = load_model(model_path, version=version)
-    net.collect_params().reset_ctx(ctx)
+    num_kps = cfg.NUM_LANDMARK
+    net = PatchRefineNet(num_kps=num_kps)
+    net.initialize(mx.init.Normal(), ctx=ctx)
     net.hybridize()
     criterion = SumL2Loss()
     criterion.hybridize()
@@ -199,32 +194,14 @@ def main():
     else:
         trainer = gl.trainer.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'wd': wd, 'lr_scheduler': lr_scheduler})
     # logger
-    log_dir = './log-v%d/%s' % (version, base_name)
+    log_dir = './log-refine'
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
     sw = SummaryWriter(log_dir)
-    if version == 2:
-        rds = []
-        for i in range(num_stage):
-            rd1 = Recorder('h-%d' % i, freq)
-            rd2 = Recorder('p-%d' % i, freq)
-            rds.append(rd1)
-            rds.append(rd2)
-    elif version == 3:
-        rds = [Recorder('G-h-4', freq), Recorder('G-p-4', freq), \
-               Recorder('G-h-8', freq), Recorder('G-p-8', freq), \
-               Recorder('R-h', freq), Recorder('R-p', freq)]
-    else:
-        raise RuntimeError('no such version %d'%version)
+    rds = [Recorder('offset', freq)]
     # meta info
     global_step = 0
     # forward and backward
-    if version == 2:
-        forward_backward = forward_backward_v2
-    elif version == 3:
-        forward_backward = forward_backward_v3
-    else:
-        raise RuntimeError('no such version %d'%version)
     for epoch_idx in range(epoches):
         # train part
         tic = time.time()

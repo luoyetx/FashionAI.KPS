@@ -1,9 +1,16 @@
 from __future__ import print_function, division
 
+import os
+os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT']='0'
 import argparse
+import cv2
+import mxnet as mx
 import numpy as np
 import pandas as pd
 
+from lib.model import load_model, multi_scale_predict, PatchRefineNet
+from lib.utils import draw_heatmap, draw_kps, draw_paf, crop_patch_refine
+from lib.detect_kps import detect_kps
 from lib.config import cfg
 
 
@@ -37,26 +44,69 @@ def read_csv(path):
         for j in range(3):
             kps.append(df[cols[i]].apply(lambda x: int(x.split('_')[j])).as_matrix())
     kps = np.vstack(kps).T.reshape((len(img_lst), -1, 3)).astype(np.float)
-    return kps, category
+    return img_lst, kps, category
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gt', type=str, default='./data/val.csv')
     parser.add_argument('--pred', type=str, default='./result/val_result.csv')
+    parser.add_argument('--th', type=float, default=0.05)
+    parser.add_argument('--model', type=str)
     args = parser.parse_args()
     print(args)
-    kps_gt, category = read_csv(args.gt)
-    kps_pred, _ = read_csv(args.pred)
+    img_lst, kps_gt, category = read_csv(args.gt)
+    _, kps_pred, _ = read_csv(args.pred)
     assert len(kps_gt) == len(kps_pred)
+
+    # model
+    if args.model:
+        ctx = mx.gpu(0)
+        net = load_model(args.model, version=2)
+        net.collect_params().reset_ctx(ctx)
+        net.hybridize()
+        rnet = PatchRefineNet(num_kps=24)
+        rnet.load_params('./output/refine-0023.params')
+        rnet.collect_params().reset_ctx(ctx)
+        rnet.hybridize()
+
+    th = args.th
 
     num_category = len(cfg.CATEGORY)
     result = [[] for i in range(num_category)]
-    for gt, pred, cate in zip(kps_gt, kps_pred, category):
+    for img_id, gt, pred, cate in zip(img_lst, kps_gt, kps_pred, category):
         cate_idx = cfg.CATEGORY.index(cate)
         err, state = calc_error(pred, gt, cate)
         if state:
             result[cate_idx].append(err)
+            if args.model and err.mean() > th:
+                # predict
+                img = cv2.imread('./data/' + img_id)
+                heatmap, paf = multi_scale_predict(net, ctx, img, True)
+                pred = detect_kps(img, heatmap, paf, cate)
+                # refine
+                pred_ref = rnet.predict(img, pred, ctx)
+                ref_err, _ = calc_error(pred_ref, gt, cate)
+                print('-------------------------')
+                keep = np.where(gt[:, 2] == 1)[0]
+                for i1, i2, i3 in zip(keep, err, ref_err):
+                    print(i1, gt[i1, :2])
+                    print(i2, pred[i1, :2])
+                    print(i3, pred_ref[i1, :2])
+                print('mean', err.mean())
+                print('ref_mean', ref_err.mean())
+                print('-------------------------')
+                # show
+                landmark_idx = cfg.LANDMARK_IDX[cate]
+                heatmap = heatmap[landmark_idx].max(axis=0)
+                cv2.imshow('heatmap', draw_heatmap(img, heatmap))
+                cv2.imshow('kps_pred', draw_kps(img, pred))
+                cv2.imshow('kps_gt', draw_kps(img, gt))
+                cv2.imshow('paf', draw_paf(img, paf))
+                cv2.imshow('refine', draw_kps(img, pred_ref))
+                key = cv2.waitKey(0)
+                if key == 27:
+                    break
 
     result = [np.hstack(_) for _ in result]
     for i in range(num_category):

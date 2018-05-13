@@ -50,6 +50,7 @@ def detect_kps(img, heatmap, paf, category):
     for i in range(num_ldm):
         ht_ori = heatmap[:, :, i]
         ht = gaussian_filter(ht_ori, sigma=sigma)
+        #ht = cv2.GaussianBlur(ht_ori, (7, 7), 0)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)
         peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse

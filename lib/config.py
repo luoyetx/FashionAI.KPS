@@ -36,7 +36,6 @@ cfg.PAF_LANDMARK_PAIR = [(0, 1), (0, 2), (0, 3),
                          (20, 21),
                          (22, 23),]
 
-cfg.HEATMAP_THRES = 1
 cfg.CROP_SIZE = 368
 cfg.ROT_MAX = 40
 cfg.SCALE_MIN_RATE = 0.6

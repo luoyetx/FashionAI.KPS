@@ -46,8 +46,11 @@ def work_func(df, idx, args):
         # show
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
+            ht = cv2.GaussianBlur(heatmap, (15, 15), 0)
+            ht = ht[landmark_idx].max(axis=0)
             heatmap = heatmap[landmark_idx].max(axis=0)
             cv2.imshow('heatmap', draw_heatmap(img, heatmap))
+            cv2.imshow('heatmap_blur', draw_heatmap(img, ht))
             cv2.imshow('kps_pred', draw_kps(img, kps_pred))
             cv2.imshow('paf', draw_paf(img, paf))
             key = cv2.waitKey(0)

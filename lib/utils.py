@@ -2,6 +2,7 @@ from __future__ import print_function, division
 
 import os
 import logging
+import datetime
 import cv2
 import mxnet as mx
 import numpy as np
@@ -29,7 +30,7 @@ def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
     x1, y1, x2, y2 = bbox
     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
     if x1 >= width or y1 >= height or x2 <= 0 or y2 <= 0:
-        print('[WARN] ridiculous x1, y1, x2, y2')
+        # print('[WARN] ridiculous x1, y1, x2, y2')
         return None
     if x1 < 0 or y1 < 0 or x2 > width or y2 > height:
         # out of boundary, still crop the face
@@ -47,6 +48,23 @@ def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
         patch[sy:sy+vh, sx:sx+vw] = img[vy1:vy2, vx1:vx2]
         return patch
     return img[y1:y2, x1:x2]
+
+
+def crop_patch_refine(img, kps, size):
+    num_kps = len(kps)
+    data = np.zeros(shape=(3*num_kps, size, size))
+    mask = np.zeros(shape=(num_kps, 2))
+    l = size // 2
+    for i, (x, y, v) in enumerate(kps):
+        if v != -1:
+            x, y = int(x), int(y)
+            bbox = (x - l, y - l, x + l, y + l)
+            patch = crop_patch(img, bbox)
+            if patch is not None:
+                patch = process_cv_img(patch)
+                data[3*i:3*i+3] = patch
+                mask[i] = 1
+    return data, mask
 
 
 def draw_kps(im, kps):
@@ -115,14 +133,21 @@ def draw_det(im, det, draw_cate=None):
     return im
 
 
-def get_logger(name=None):
+def get_logger(name=None, fn=None):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
+    # console
     sh = logging.StreamHandler()
     sh.setLevel(logging.INFO)
     formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s')
     sh.setFormatter(formatter)
     logger.addHandler(sh)
+    # file
+    if fn:
+        fh = logging.FileHandler(fn, mode='w')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
     return logger
 
 

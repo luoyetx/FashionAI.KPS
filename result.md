@@ -276,7 +276,7 @@ Total Average Error 0.059184
 
 public 0.0554
 
-- v2.31 V2.mexpo-resnet50-S3-C256-BS24-adam-0055.params, test err 2.086
+- v2.31 V2.mexpo-resnet50-S3-C256-BS24-adam-0055.params, no mask to feat, test err 2.086
 
 ```
 Average Error for blouse: 0.038934
@@ -298,7 +298,7 @@ Total Average Error 0.039812
 
 public 0.0397
 
-- v2.32 V2.mexpo-resnet50-S3-C256-BS24-adam-0070.params, test err 2.086
+- v2.32 V2.mexpo-resnet50-S3-C256-BS24-adam-0070.params, no mask to feat, test err 2.086
 
 ```
 Average Error for blouse: 0.037898
@@ -309,4 +309,17 @@ Average Error for trousers: 0.038677
 Total Average Error 0.039627
 ```
 
-public
+public 0.0395
+
+- v2.33 V2.default-resnet50-S3-C256-BS28-adam-0067.params, test err 2.071945
+
+```
+Average Error for blouse: 0.038148
+Average Error for skirt: 0.032480
+Average Error for outwear: 0.042623
+Average Error for dress: 0.041367
+Average Error for trousers: 0.040135
+Total Average Error 0.039756
+```
+
+public 0.0394

@@ -8,7 +8,7 @@ from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
 from lib.config import cfg
-from lib.utils import process_cv_img
+from lib.utils import process_cv_img, crop_patch_refine
 
 
 def freeze_bn(block):
@@ -121,6 +121,7 @@ class PoseNet(gl.HybridBlock):
     def __init__(self, num_kps, num_limb, num_stage, num_channel):
         super(PoseNet, self).__init__(prefix='posenet')
         self.num_stage = num_stage
+        self.scale = 3
         with self.name_scope():
             # backbone
             self.backbone = None
@@ -142,7 +143,7 @@ class PoseNet(gl.HybridBlock):
             if i != self.num_stage - 1:
                 feat = F.concat(feat, x)
                 # mask
-                mask = F.exp(F.max(ht, axis=1, keepdims=True))
+                mask = F.exp(self.scale * F.max(ht, axis=1, keepdims=True))
                 feat = F.broadcast_mul(feat, mask)
         return outs
 
@@ -269,6 +270,49 @@ class CascadePoseNet(gl.HybridBlock):
             paf_flip = out[1][1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
+
+
+##### Refine Model
+
+class PatchRefineNet(gl.HybridBlock):
+
+    def __init__(self, num_kps):
+        super(PatchRefineNet, self).__init__(prefix='patchrefinenet')
+        self.num_kps = num_kps
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            for _ in range(num_kps):
+                self.body.add(self.bk())
+
+    def bk(self):
+        body = nn.HybridSequential()
+        body.add(ConvBnReLU(32))
+        body.add(nn.MaxPool2D())
+        body.add(ConvBnReLU(64))
+        body.add(nn.MaxPool2D())
+        body.add(ConvBnReLU(64))
+        body.add(nn.MaxPool2D())
+        body.add(nn.Dense(128))
+        body.add(nn.BatchNorm())
+        body.add(nn.Activation(activation='relu'))
+        body.add(nn.Dense(2))
+        return body
+
+    def hybrid_forward(self, F, x):
+        xs = F.split(x, axis=1, num_outputs=self.num_kps)
+        ys = [net(x) for net, x in zip(self.body, xs)]
+        y = F.concat(*ys)
+        return y
+
+    def predict(self, img, kps, ctx):
+        data, _ = crop_patch_refine(img, kps, size=36)
+        data = data[np.newaxis].astype('float32')
+        data = mx.nd.array(data, ctx)
+        offset = self(data)[0].asnumpy()
+        offset = offset.reshape((-1, 2))
+        pred = kps.copy()
+        pred[:, :2] = (pred[:, :2] + offset).astype('int')
+        return pred
 
 
 ##### detection model
