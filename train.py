@@ -27,8 +27,8 @@ class SumL2Loss(gl.loss.Loss):
         super(SumL2Loss, self).__init__(weight, batch_axis, **kwargs)
 
     def hybrid_forward(self, F, pred, label, mask):
-        pred = F.elemwise_mul(pred, mask)
-        label = F.elemwise_mul(label, mask)
+        pred = F.broadcast_mul(pred, mask)
+        label = F.broadcast_mul(label, mask)
         label = gl.loss._reshape_like(F, label, pred)
         loss = F.square(pred - label)
         loss = gl.loss._apply_weighting(F, loss, self._weight/2, None)
@@ -36,7 +36,7 @@ class SumL2Loss(gl.loss.Loss):
 
 
 def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
-    data, ht1, ht1_mask, paf1, paf1_mask, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask = packet
+    data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
     ht8 = gl.utils.split_and_load(ht8, ctx)
@@ -65,35 +65,28 @@ def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
 
 
 def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
-    data, ht1, ht1_mask, paf1, paf1_mask, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask = packet
-    ht = [ht4, ht8]
-    paf = [paf4, paf8]
-    ht_mask = [ht4_mask, ht8_mask]
-    paf_mask = [paf4_mask, paf8_mask]
+    data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
-    ht = [gl.utils.split_and_load(x, ctx) for x in ht]
-    paf = [gl.utils.split_and_load(x, ctx) for x in paf]
-    ht_mask = [gl.utils.split_and_load(x, ctx) for x in ht_mask]
-    paf_mask = [gl.utils.split_and_load(x, ctx) for x in paf_mask]
+    ht1 = gl.utils.split_and_load(ht1, ctx)
+    ht1_mask = gl.utils.split_and_load(ht1_mask, ctx)
+    ht8 = gl.utils.split_and_load(ht8, ctx)
+    ht8_mask = gl.utils.split_and_load(ht8_mask, ctx)
+    paf8 = gl.utils.split_and_load(paf8 ,ctx)
+    paf8_mask = gl.utils.split_and_load(paf8_mask ,ctx)
     # run
     ag.set_recording(is_train)
     ag.set_training(is_train)
     losses = []
-    for idx, data_ in enumerate(data):
+    for data_, ht1_, ht8_, paf8_, ht1_mask_, ht8_mask_, paf8_mask_ in zip(data, ht1, ht8, paf8, ht1_mask, ht8_mask, paf8_mask):
         # forward
-        (g_ht4, g_paf4, g_ht8, g_paf8), (r_ht, r_paf) = net(data_)
-        ht4_, ht8_ = [h[idx] for h in ht]
-        paf4_, paf8_ = [p[idx] for p in paf]
-        ht4_mask_, ht8_mask_ = [hm[idx] for hm in ht_mask]
-        paf4_mask_, paf8_mask_ = [pm[idx] for pm in paf_mask]
-        # loss
-        losses_ = [criterion(g_ht4, ht4_, ht4_mask_),
-                   criterion(g_paf4, paf4_, paf4_mask_),
-                   criterion(g_ht8, ht8_, ht8_mask_),
-                   criterion(g_paf8, paf8_, paf8_mask_),
-                   criterion(r_ht, ht4_, ht4_mask_),
-                   criterion(r_paf, paf4_, paf4_mask_)]
+        gl_, out_ = net(data_)
+        losses_ = []
+        num_stage = len(out_)
+        for i in range(num_stage):
+            losses_.append(criterion(out_[i][0], ht8_, ht8_mask_))
+            losses_.append(criterion(out_[i][1], paf8_, paf8_mask_))
+        losses_.append(criterion(gl_, ht1_, ht1_mask_))
         losses.append(losses_)
         # backward
         if is_train:
@@ -121,7 +114,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--freq', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--wd', type=float, default=1e-5)
+    parser.add_argument('--wd', type=float, default=1e-4)
     parser.add_argument('--optim', type=str, default='adam', choices=['sgd', 'adam'])
     parser.add_argument('--seed', type=int, default=666)
     parser.add_argument('--steps', type=str, default='1000')
@@ -155,8 +148,8 @@ def main():
     version = args.version
     if version == 2:
         base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
-    elif version == 3:
-        base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
+    if version == 3:
+        base_name = 'V3.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
     else:
         raise RuntimeError('no such version %d'%version)
     filename = './tmp/%s.log' % base_name
@@ -177,8 +170,8 @@ def main():
         if version == 2:
             net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-        elif version == 3:
-            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
+        if version == 3:
+            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v3[backbone]
         else:
             raise RuntimeError('no such version %d'%version)
@@ -210,10 +203,14 @@ def main():
             rd2 = Recorder('p-%d' % i, freq)
             rds.append(rd1)
             rds.append(rd2)
-    elif version == 3:
-        rds = [Recorder('G-h-4', freq), Recorder('G-p-4', freq), \
-               Recorder('G-h-8', freq), Recorder('G-p-8', freq), \
-               Recorder('R-h', freq), Recorder('R-p', freq)]
+    if version == 3:
+        rds = []
+        for i in range(num_stage):
+            rd1 = Recorder('h-%d' % i, freq)
+            rd2 = Recorder('p-%d' % i, freq)
+            rds.append(rd1)
+            rds.append(rd2)
+        rds.append(Recorder('Global', freq))
     else:
         raise RuntimeError('no such version %d'%version)
     # meta info
@@ -221,7 +218,7 @@ def main():
     # forward and backward
     if version == 2:
         forward_backward = forward_backward_v2
-    elif version == 3:
+    if version == 3:
         forward_backward = forward_backward_v3
     else:
         raise RuntimeError('no such version %d'%version)

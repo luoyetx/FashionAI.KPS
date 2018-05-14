@@ -107,10 +107,10 @@ def get_border(shape, kps, expand=0):
 
 
 def get_label(height, width, category, kps):
-    strides = [1, 4, 8]
-    gks = [15, 7, 3]
-    sigmas = [7, 7, 7]
-    ths = [2, 1, 1]
+    strides = [1, 8]
+    gks = [15, 3]
+    sigmas = [7, 7]
+    ths = [4, 1]
     hts, pafs, hts_mask, pafs_mask = [], [], [], []
     for stride, gk, sigma, th in zip(strides, gks, sigmas, ths):
         grid_x = width // stride
@@ -118,8 +118,8 @@ def get_label(height, width, category, kps):
         # heatmap and mask
         landmark_idx = cfg.LANDMARK_IDX[category]
         num_kps = len(kps)
-        ht = np.zeros((num_kps, grid_y, grid_x))
-        ht_mask = np.zeros_like(ht)
+        ht = np.zeros(shape=(num_kps, grid_y, grid_x))
+        ht_mask = np.zeros(shape=(num_kps, 1, 1))
         for i, (x, y, v) in enumerate(kps):
             if i in landmark_idx and v != -1:
                 ht_mask[i] = 1
@@ -133,8 +133,8 @@ def get_label(height, width, category, kps):
         # paf and mask
         limb = cfg.PAF_LANDMARK_PAIR
         num_limb = len(limb)
-        paf = np.zeros((num_limb, grid_y, grid_x))
-        paf_mask = np.zeros_like(paf)
+        paf = np.zeros(shape=(num_limb, grid_y, grid_x))
+        paf_mask = np.zeros(shape=(num_limb, 1, 1))
         for idx, (idx1, idx2) in enumerate(limb):
             x1, y1, v1 = kps[idx1]
             x2, y2, v2 = kps[idx2]
@@ -185,11 +185,11 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         self.cur_kps = kps  # for debug and show
         # get label
         hts, hts_mask, pafs, pafs_mask = get_label(height, width, category, kps)
-        ht1, ht4, ht8= hts
-        ht1_mask, ht4_mask, ht8_mask = hts_mask
-        paf1, paf4, paf8 = pafs
-        paf1_mask, paf4_mask, paf8_mask = pafs_mask
-        return img, ht1, ht1_mask, paf1, paf1_mask, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask
+        ht1, ht8 = hts
+        ht1_mask, ht8_mask, = hts_mask
+        paf1, paf8 = pafs
+        paf1_mask, paf8_mask, = pafs_mask
+        return img, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask
 
     def __len__(self):
         return len(self.img_lst)
@@ -287,18 +287,15 @@ def show_kps(args):
     print('DataSet Size', len(dataset))
     for idx, packet in enumerate(dataset):
         # unpack
-        data, ht1, ht1_mask, paf1, paf1_mask, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask = packet
+        data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
 
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
         category = dataset.category[idx]
         cv2.imshow("kps", draw_kps(img, kps))
-        cv2.imshow('o-h1', draw_heatmap(img, ht1.max(axis=0)))
-        cv2.imshow('o-h4', draw_heatmap(img, ht4.max(axis=0)))
-        cv2.imshow('o-h8', draw_heatmap(img, ht8.max(axis=0)))
-        cv2.imshow('o-paf1', draw_paf(img, paf1))
-        cv2.imshow('o-paf4', draw_paf(img, paf4))
-        cv2.imshow('o-paf8', draw_paf(img, paf8))
+        cv2.imshow('h1', draw_heatmap(img, ht1.max(axis=0)))
+        cv2.imshow('h8', draw_heatmap(img, ht8.max(axis=0)))
+        cv2.imshow('paf8', draw_paf(img, paf8))
 
         key = cv2.waitKey(0)
         if key == 27:
