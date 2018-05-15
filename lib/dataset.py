@@ -121,7 +121,7 @@ def get_label(height, width, category, kps):
         ht = np.zeros(shape=(num_kps, grid_y, grid_x))
         ht_mask = np.zeros(shape=(num_kps, 1, 1))
         for i, (x, y, v) in enumerate(kps):
-            if i in landmark_idx and v != -1:
+            if i in landmark_idx and v == 1:
                 ht_mask[i] = 1
                 putGaussianMaps(ht[i], x, y, v, stride, sigma)
                 # tx, ty = int(x / stride), int(y / stride)
@@ -156,9 +156,10 @@ def get_label(height, width, category, kps):
 
 class FashionAIKPSDataSet(gl.data.Dataset):
 
-    def __init__(self, df, is_train=True):
+    def __init__(self, df, need_ht=True, is_train=True):
         self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
+        self.need_ht = need_ht
         # img path
         self.img_lst = df['image_id'].tolist()
         self.category = df['image_category'].tolist()
@@ -189,7 +190,10 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         ht1_mask, ht8_mask, = hts_mask
         paf1, paf8 = pafs
         paf1_mask, paf8_mask, = pafs_mask
-        return img, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask
+        if not self.need_ht:
+            return img, ht8, ht8_mask, paf8, paf8_mask
+        else:
+            return img, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask
 
     def __len__(self):
         return len(self.img_lst)

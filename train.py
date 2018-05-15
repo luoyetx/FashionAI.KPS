@@ -36,7 +36,7 @@ class SumL2Loss(gl.loss.Loss):
 
 
 def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
-    data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
+    data, ht8, ht8_mask, paf8, paf8_mask = packet
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
     ht8 = gl.utils.split_and_load(ht8, ctx)
@@ -148,7 +148,7 @@ def main():
     version = args.version
     if version == 2:
         base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
-    if version == 3:
+    elif version == 3:
         base_name = 'V3.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
     else:
         raise RuntimeError('no such version %d'%version)
@@ -158,8 +158,9 @@ def main():
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    traindata = FashionAIKPSDataSet(df_train, is_train=True)
-    testdata = FashionAIKPSDataSet(df_test, is_train=False)
+    need_ht = True if version == 3 else False
+    traindata = FashionAIKPSDataSet(df_train, need_ht=need_ht, is_train=True)
+    testdata = FashionAIKPSDataSet(df_test, need_ht=need_ht, is_train=False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
@@ -170,7 +171,7 @@ def main():
         if version == 2:
             net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v2[backbone]
-        if version == 3:
+        elif version == 3:
             net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
             creator, featname, fixed = cfg.BACKBONE_v3[backbone]
         else:
@@ -203,7 +204,7 @@ def main():
             rd2 = Recorder('p-%d' % i, freq)
             rds.append(rd1)
             rds.append(rd2)
-    if version == 3:
+    elif version == 3:
         rds = []
         for i in range(num_stage):
             rd1 = Recorder('h-%d' % i, freq)
@@ -218,7 +219,7 @@ def main():
     # forward and backward
     if version == 2:
         forward_backward = forward_backward_v2
-    if version == 3:
+    elif version == 3:
         forward_backward = forward_backward_v3
     else:
         raise RuntimeError('no such version %d'%version)

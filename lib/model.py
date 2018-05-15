@@ -147,8 +147,9 @@ class PoseNet(gl.HybridBlock):
                 feat = F.broadcast_mul(feat, mask)
         return outs
 
-    def init_backbone(self, creator, featname, fixed, pretrained=True):
-        install_backbone(self, creator, [featname], fixed, pretrained)
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
+        assert len(featnames) == 1
+        install_backbone(self, creator, featnames, fixed, pretrained)
 
     def predict(self, img, ctx, flip=True):
         data = process_cv_img(img)
@@ -258,12 +259,12 @@ class CascadePoseNet(gl.HybridBlock):
         else:
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        out = self(batch)
+        ht, out = self(batch)
         idx = -1
-        heatmap = out[idx][0][0].asnumpy().astype('float64')
+        heatmap = ht[0].asnumpy().astype('float64')
         paf = out[idx][1][0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = out[idx][0][1].asnumpy().astype('float64')
+            heatmap_flip = ht[1].asnumpy().astype('float64')
             paf_flip = out[idx][1][1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
