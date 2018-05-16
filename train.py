@@ -125,6 +125,7 @@ def main():
     parser.add_argument('--version', type=int, default=2, choices=[2, 3], help='model version')
     parser.add_argument('--num-stage', type=int, default=3)
     parser.add_argument('--num-channel', type=int, default=256)
+    parser.add_argument('--num-context', type=int, default=2)
     args = parser.parse_args()
     # seed
     mx.random.seed(args.seed)
@@ -145,6 +146,7 @@ def main():
     model_path = None if args.model_path == '' else args.model_path
     num_stage = args.num_stage
     num_channel = args.num_channel
+    num_context = args.num_context
     version = args.version
     if version == 2:
         base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
@@ -169,7 +171,7 @@ def main():
         num_kps = cfg.NUM_LANDMARK
         num_limb = len(cfg.PAF_LANDMARK_PAIR)
         if version == 2:
-            net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
+            net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel, num_context=num_context)
             creator, featname, fixed = cfg.BACKBONE_v2[backbone]
         elif version == 3:
             net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)

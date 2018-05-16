@@ -118,7 +118,7 @@ class CPMBlock(gl.HybridBlock):
 
 class PoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_stage, num_channel):
+    def __init__(self, num_kps, num_limb, num_stage, num_channel, num_context=2):
         super(PoseNet, self).__init__(prefix='posenet')
         self.num_stage = num_stage
         self.scale = 3
@@ -130,7 +130,7 @@ class PoseNet(gl.HybridBlock):
             # cpm
             self.cpm = nn.HybridSequential()
             for _ in range(num_stage):
-                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, 2))
+                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, num_context))
 
     def hybrid_forward(self, F, x):
         x = self.backbone(x)  # pylint: disable=not-callable

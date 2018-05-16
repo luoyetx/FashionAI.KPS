@@ -46,7 +46,7 @@ def work_func(df, idx, args):
         # show
         if show:
             landmark_idx = cfg.LANDMARK_IDX[category]
-            ht = cv2.GaussianBlur(heatmap, (15, 15), 0)
+            ht = cv2.GaussianBlur(heatmap, (7, 7), 0)
             ht = ht[landmark_idx].max(axis=0)
             heatmap = heatmap[landmark_idx].max(axis=0)
             cv2.imshow('heatmap', draw_heatmap(img, heatmap))

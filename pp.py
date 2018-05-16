@@ -92,9 +92,9 @@ def main():
                 for i1, i2, i3 in zip(keep, err, ref_err):
                     print(i1, gt[i1, :2])
                     print(i2, pred[i1, :2])
-                    print(i3, pred_ref[i1, :2])
+                    #print(i3, pred_ref[i1, :2])
                 print('mean', err.mean())
-                print('ref_mean', ref_err.mean())
+                #print('ref_mean', ref_err.mean())
                 print('-------------------------')
                 # show
                 landmark_idx = cfg.LANDMARK_IDX[cate]

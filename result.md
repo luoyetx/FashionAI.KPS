@@ -324,7 +324,7 @@ Total Average Error 0.039756
 
 public 0.0394
 
-- v2.34 V2.no.occ-resnet50-S3-C256-BS28-adam-0070.params, test err 1.378
+- v2.34 V2.no.occ-resnet50-S3-C256-BS28-adam-0070.params, num_context=2, test err 1.378
 
 ```
 Average Error for blouse: 0.037351
@@ -335,4 +335,17 @@ Average Error for trousers: 0.038042
 Total Average Error 0.038805
 ```
 
-public
+public 0.0388
+
+- v2.35 V2.no.occ-resnet50-S3-C256-BS28-adam-0065.params, num_context=2, test err 1.377
+
+```
+Average Error for blouse: 0.037600
+Average Error for skirt: 0.032327
+Average Error for outwear: 0.041127
+Average Error for dress: 0.041228
+Average Error for trousers: 0.037826
+Total Average Error 0.038841
+```
+
+public 0.0388
