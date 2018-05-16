@@ -199,49 +199,6 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         return len(self.img_lst)
 
 
-class FashionAIPatchDataSet(gl.data.Dataset):
-
-    def __init__(self, df, is_train=True):
-        self.img_dir = cfg.DATA_DIR
-        self.is_train = is_train
-        # img path
-        self.img_lst = df['image_id'].tolist()
-        self.category = df['image_category'].tolist()
-        # kps, (x, y, v) v -> (not exists -1, occur 0, normal 1)
-        cols = df.columns[2:]
-        kps = []
-        for i in range(cfg.NUM_LANDMARK):
-            for j in range(3):
-                kps.append(df[cols[i]].apply(lambda x: int(x.split('_')[j])).as_matrix())
-        kps = np.vstack(kps).T.reshape((len(self.img_lst), -1, 3)).astype(np.float)
-        self.kps = kps
-
-    def __getitem__(self, idx):
-        # meta
-        img_path = os.path.join(self.img_dir, self.img_lst[idx])
-        img = cv2.imread(img_path)
-        category = self.category[idx]
-        kps = self.kps[idx].copy()
-        # transform
-        img, kps = transform(img, kps, self.is_train)
-        # preprocess
-        self.cur_kps = kps  # for debug and show
-        # get label
-        num_kps = len(kps)
-        delta = 12
-        offset = np.random.uniform(low=-delta, high=delta, size=(num_kps, 2))
-        center = kps.copy()
-        center[:, :2] -= offset
-        data, mask = crop_patch_refine(img, center, size=36)
-        mask = mask.astype('float32').flatten()
-        offset = offset.astype('float32').flatten()
-        data = data.astype('float32')
-        return data, offset, mask
-
-    def __len__(self):
-        return len(self.img_lst)
-
-
 class FashionAIDetDataSet(gl.data.Dataset):
 
     def __init__(self, df, is_train=True):
@@ -306,27 +263,6 @@ def show_kps(args):
             break
 
 
-def show_patch(args):
-    df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
-    dataset = FashionAIPatchDataSet(df, is_train=args.type == 'train')
-    print('DataSet Size', len(dataset))
-    for idx, packet in enumerate(dataset):
-        # unpack
-        data, offset, mask = packet
-        num_kps = cfg.NUM_LANDMARK
-        for i in range(num_kps):
-            if mask[2*i] != 0:
-                patch = reverse_to_cv_img(data[3*i:3*i+3]).copy()
-                patch = cv2.circle(patch, (18, 18), 2, (0, 255, 0), -1)
-                dx, dy = offset[2*i:2*i+2]
-                dx, dy = int(dx), int(dy)
-                patch = cv2.circle(patch, (18+dx, 18+dy), 2, (0, 0, 255), -1)
-                cv2.imshow('%d'%i, patch)
-        key = cv2.waitKey(0)
-        if key == 27:
-            break
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--type', type=str, default='train', choices=['train', 'test'])
@@ -338,8 +274,6 @@ def main():
         show_det(args)
     elif args.dataset == 'kps':
         show_kps(args)
-    else:
-        show_patch(args)
 
 
 if __name__ == '__main__':

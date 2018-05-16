@@ -8,7 +8,7 @@ import mxnet as mx
 import numpy as np
 import pandas as pd
 
-from lib.model import load_model, multi_scale_predict, PatchRefineNet
+from lib.model import load_model, multi_scale_predict
 from lib.utils import draw_heatmap, draw_kps, draw_paf, crop_patch_refine
 from lib.detect_kps import detect_kps
 from lib.config import cfg
@@ -65,10 +65,6 @@ def main():
         net = load_model(args.model, version=2)
         net.collect_params().reset_ctx(ctx)
         net.hybridize()
-        rnet = PatchRefineNet(num_kps=24)
-        rnet.load_params('./output/refine-0023.params')
-        rnet.collect_params().reset_ctx(ctx)
-        rnet.hybridize()
 
     th = args.th
 
@@ -84,17 +80,11 @@ def main():
                 img = cv2.imread('./data/' + img_id)
                 heatmap, paf = multi_scale_predict(net, ctx, img, True)
                 pred = detect_kps(img, heatmap, paf, cate)
-                # refine
-                pred_ref = rnet.predict(img, pred, ctx)
-                ref_err, _ = calc_error(pred_ref, gt, cate)
                 print('-------------------------')
                 keep = np.where(gt[:, 2] == 1)[0]
-                for i1, i2, i3 in zip(keep, err, ref_err):
-                    print(i1, gt[i1, :2])
-                    print(i2, pred[i1, :2])
-                    #print(i3, pred_ref[i1, :2])
+                for i1, i2 in zip(keep, err):
+                    print(i1, i2, gt[i1, :2], pred[i1, :2])
                 print('mean', err.mean())
-                #print('ref_mean', ref_err.mean())
                 print('-------------------------')
                 # show
                 landmark_idx = cfg.LANDMARK_IDX[cate]
@@ -103,7 +93,6 @@ def main():
                 cv2.imshow('kps_pred', draw_kps(img, pred))
                 cv2.imshow('kps_gt', draw_kps(img, gt))
                 cv2.imshow('paf', draw_paf(img, paf))
-                cv2.imshow('refine', draw_kps(img, pred_ref))
                 key = cv2.waitKey(0)
                 if key == 27:
                     break
