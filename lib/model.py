@@ -247,12 +247,46 @@ class CascadePoseNet(gl.HybridBlock):
         super(CascadePoseNet, self).__init__(prefix='cpn')
         with self.name_scope():
             self.backbone = None
-            self.global_net = CPNGlobalBlock(num_kps, num_limb, num_channel)
+            self.f4 = ConvBnReLU(256)
+            self.f8 = ConvBnReLU(256)
+            self.f16 = ConvBnReLU(256)
+            self.upx2 = UpSamplingBlock(256, 2)
+            self.context16 = nn.HybridSequential()
+            self.context16.add(ContextBlock(128), ContextBlock(128))
+            self.context16tofeat = ConvBnReLU(256)
+            self.p16_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p16_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.context8 = nn.HybridSequential()
+            self.context8.add(ContextBlock(128), ContextBlock(128))
+            self.context8tofeat = ConvBnReLU(256)
+            self.p8_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p8_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.context4 = nn.HybridSequential()
+            self.context4.add(ContextBlock(64), ContextBlock(64))
+            self.p4_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p4_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+
 
     def hybrid_forward(self, F, x):
-        feats = self.backbone(x)  # pylint: disable=not-callable
-        f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16 = self.global_net(*feats)
-        return ht4, paf4, ht8, paf8, ht16, paf16
+        f4, f8, f16 = self.backbone(x)  # pylint: disable=not-callable
+        # 16
+        f16 = self.f16(f16)
+        g_ht16, g_paf16 = self.p16_1(f16)
+        f16 = self.context16(f16)
+        r_ht16, r_paf16 = self.p16_2(f16)
+        # 8
+        f16 = self.context16tofeat(f16)
+        f8 = self.f8(f8) + F.Crop(self.upx2(f16), f8)
+        g_ht8, g_paf8 = self.p8_1(f8)
+        f8 = self.context8(f8)
+        r_ht8, r_paf8 = self.p8_2(f8)
+        # 4
+        f8 = self.context8tofeat(f8)
+        f4 = self.f4(f4) + F.Crop(self.upx2(f8), f4)
+        g_ht4, g_paf4 = self.p4_1(f4)
+        f4 = self.context4(f4)
+        r_ht4, r_paf4 = self.p4_2(f4)
+        return g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16
 
     def init_backbone(self, creator, featnames, fixed, pretrained=True):
         assert len(featnames) == 3
@@ -266,89 +300,36 @@ class CascadePoseNet(gl.HybridBlock):
         else:
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        _, out = self(batch)
-        heatmap = out[0][0].asnumpy().astype('float64')
-        paf = out[1][0].asnumpy().astype('float64')
+        g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16 = self(batch)
+        heatmap = g_ht4[0].asnumpy().astype('float64')
+        paf = g_paf4[0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = out[0][1].asnumpy().astype('float64')
-            paf_flip = out[1][1].asnumpy().astype('float64')
+            heatmap_flip = g_ht4[1].asnumpy().astype('float64')
+            paf_flip = g_paf4[1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
 
 
-##### detection model
-
-class FPNBlock(gl.HybridBlock):
-
-    def __init__(self, num_channel):
-        super(FPNBlock, self).__init__()
-        with self.name_scope():
-            self.P8 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
-            self.P16 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
-            self.up = UpSamplingBlock(num_channel, 2)
-
-    def hybrid_forward(self, F, f8, f16):
-        f8 = self.P8(f8)
-        f16 = self.P16(f16)
-        f8 = f8 + F.Crop(self.up(f16), f8)
-        return f8, f16
-
-
-class RPNBlock(gl.HybridBlock):
-
-    def __init__(self, num_anchors, num_category):
-        super(RPNBlock, self).__init__()
-        with self.name_scope():
-            self.body = nn.HybridSequential()
-            self.body.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
-            # rpn_cls: N, C x A x 2, H, W
-            # rpn_reg: N, C X A x 4, H, W
-            self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1)
-            self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1)
-
-    def hybrid_forward(self, F, x):
-        x = self.body(x)
-        anchor_cls = self.rpn_cls(x)
-        anchor_reg = self.rpn_reg(x)
-        return anchor_cls, anchor_reg
-
-
-class DetNet(gl.HybridBlock):
-
-    def __init__(self, anchor_proposals):
-        super(DetNet, self).__init__(prefix='detnet')
-        assert len(anchor_proposals) == 2
-        num_category = 3
-        self.anchor_proposals = anchor_proposals
-        with self.name_scope():
-            self.backbone = None
-            self.fpn = FPNBlock(num_channel=128)
-            self.rpn1 = RPNBlock(anchor_proposals[0].num_anchors, num_category)
-            self.rpn2 = RPNBlock(anchor_proposals[1].num_anchors, num_category)
-
-    def hybrid_forward(self, F, x):
-        f8, f16 = self.backbone(x)  # pylint: disable=not-callable
-        f8, f16 = self.fpn(f8, f16)
-        anchor_cls1, anchor_reg1 = self.rpn1(f8)
-        anchor_cls2, anchor_reg2 = self.rpn2(f16)
-        return anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2
-
-    def init_backbone(self, creator, featnames, fixed, pretrained=True):
-        assert len(featnames) == 2
-        install_backbone(self, creator, featnames, fixed, pretrained)
-
-    def predict(self, img, ctx, nms=True):
-        h, w = img.shape[:2]
-        data = process_cv_img(img)
-        data = data[np.newaxis]
-        batch = mx.nd.array(data, ctx=ctx)
-        anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2 = self(batch)
-        dets1 = self.anchor_proposals[0].proposal(anchor_cls1, anchor_reg1, (h, w), nms)[0]
-        dets2 = self.anchor_proposals[1].proposal(anchor_cls2, anchor_reg2, (h, w), nms)[0]
-        dets = [np.vstack([x, y]) for x, y in zip(dets1, dets2)]
-        if nms:
-            dets = [self.anchor_proposals[0].nms(det) for det in dets]
-        return dets
+def multi_scale_predict(net, ctx, img, multi_scale=False):
+    if multi_scale:
+        scales = [440, 368, 224]
+    else:
+        scales = [368]
+    h, w = img.shape[:2]
+    # init
+    heatmap = 0
+    paf = 0
+    for scale in scales:
+        factor = scale / max(h, w)
+        img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
+        heatmap_, paf_ = net.predict(img_, ctx)
+        heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+        paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
+        heatmap = heatmap + heatmap_
+        paf = paf + paf_
+    heatmap /= len(scales)
+    paf /= len(scales)
+    return heatmap, paf
 
 
 ##### Utils
@@ -436,6 +417,81 @@ def load_model(model, version=2):
     return net
 
 
+##### detection model
+
+class FPNBlock(gl.HybridBlock):
+
+    def __init__(self, num_channel):
+        super(FPNBlock, self).__init__()
+        with self.name_scope():
+            self.P8 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
+            self.P16 = nn.Conv2D(num_channel, kernel_size=1, padding=1, activation='relu')
+            self.up = UpSamplingBlock(num_channel, 2)
+
+    def hybrid_forward(self, F, f8, f16):
+        f8 = self.P8(f8)
+        f16 = self.P16(f16)
+        f8 = f8 + F.Crop(self.up(f16), f8)
+        return f8, f16
+
+
+class RPNBlock(gl.HybridBlock):
+
+    def __init__(self, num_anchors, num_category):
+        super(RPNBlock, self).__init__()
+        with self.name_scope():
+            self.body = nn.HybridSequential()
+            self.body.add(nn.Conv2D(256, kernel_size=3, padding=1, activation='relu'))
+            # rpn_cls: N, C x A x 2, H, W
+            # rpn_reg: N, C X A x 4, H, W
+            self.rpn_cls = nn.Conv2D(2*num_anchors*num_category, kernel_size=1)
+            self.rpn_reg = nn.Conv2D(4*num_anchors*num_category, kernel_size=1)
+
+    def hybrid_forward(self, F, x):
+        x = self.body(x)
+        anchor_cls = self.rpn_cls(x)
+        anchor_reg = self.rpn_reg(x)
+        return anchor_cls, anchor_reg
+
+
+class DetNet(gl.HybridBlock):
+
+    def __init__(self, anchor_proposals):
+        super(DetNet, self).__init__(prefix='detnet')
+        assert len(anchor_proposals) == 2
+        num_category = 3
+        self.anchor_proposals = anchor_proposals
+        with self.name_scope():
+            self.backbone = None
+            self.fpn = FPNBlock(num_channel=128)
+            self.rpn1 = RPNBlock(anchor_proposals[0].num_anchors, num_category)
+            self.rpn2 = RPNBlock(anchor_proposals[1].num_anchors, num_category)
+
+    def hybrid_forward(self, F, x):
+        f8, f16 = self.backbone(x)  # pylint: disable=not-callable
+        f8, f16 = self.fpn(f8, f16)
+        anchor_cls1, anchor_reg1 = self.rpn1(f8)
+        anchor_cls2, anchor_reg2 = self.rpn2(f16)
+        return anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2
+
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
+        assert len(featnames) == 2
+        install_backbone(self, creator, featnames, fixed, pretrained)
+
+    def predict(self, img, ctx, nms=True):
+        h, w = img.shape[:2]
+        data = process_cv_img(img)
+        data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
+        anchor_cls1, anchor_reg1, anchor_cls2, anchor_reg2 = self(batch)
+        dets1 = self.anchor_proposals[0].proposal(anchor_cls1, anchor_reg1, (h, w), nms)[0]
+        dets2 = self.anchor_proposals[1].proposal(anchor_cls2, anchor_reg2, (h, w), nms)[0]
+        dets = [np.vstack([x, y]) for x, y in zip(dets1, dets2)]
+        if nms:
+            dets = [self.anchor_proposals[0].nms(det) for det in dets]
+        return dets
+
+
 def multi_scale_detection(net, ctx, img, category, multi_scale=False):
     if multi_scale:
         scales = [440, 368, 224]
@@ -454,25 +510,3 @@ def multi_scale_detection(net, ctx, img, category, multi_scale=False):
     proposals = np.vstack(dets)
     proposals = net.anchor_proposals[0].nms(proposals)
     return proposals
-
-
-def multi_scale_predict(net, ctx, img, multi_scale=False):
-    if multi_scale:
-        scales = [440, 368, 224]
-    else:
-        scales = [368]
-    h, w = img.shape[:2]
-    # init
-    heatmap = 0
-    paf = 0
-    for scale in scales:
-        factor = scale / max(h, w)
-        img_ = cv2.resize(img, (0, 0), fx=factor, fy=factor)
-        heatmap_, paf_ = net.predict(img_, ctx)
-        heatmap_ = cv2.resize(heatmap_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-        paf_ = cv2.resize(paf_.transpose((1, 2, 0)), (h, w), interpolation=cv2.INTER_CUBIC).transpose((2, 0, 1))
-        heatmap = heatmap + heatmap_
-        paf = paf + paf_
-    heatmap /= len(scales)
-    paf /= len(scales)
-    return heatmap, paf

@@ -53,6 +53,7 @@ def main():
     parser.add_argument('--pred', type=str, default='./result/val_result.csv')
     parser.add_argument('--th', type=float, default=0.05)
     parser.add_argument('--model', type=str)
+    parser.add_argument('--version', type=int, default=2)
     args = parser.parse_args()
     print(args)
     img_lst, kps_gt, category = read_csv(args.gt)
@@ -62,7 +63,7 @@ def main():
     # model
     if args.model:
         ctx = mx.gpu(0)
-        net = load_model(args.model, version=2)
+        net = load_model(args.model, version=args.version)
         net.collect_params().reset_ctx(ctx)
         net.hybridize()
 

@@ -82,18 +82,24 @@ def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
     losses = []
     for idx, data_ in enumerate(data):
         # forward
-        g_ht4, g_paf4, g_ht8, g_paf8, g_ht16, g_paf16 = net(data_)
+        g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16 = net(data_)
         ht4_, ht8_, ht16_ = [h[idx] for h in ht]
         paf4_, paf8_, paf16_ = [p[idx] for p in paf]
         ht4_mask_, ht8_mask_, ht16_mask_ = [hm[idx] for hm in ht_mask]
         paf4_mask_, paf8_mask_, paf16_mask_ = [pm[idx] for pm in paf_mask]
         # loss
         losses_ = [criterion(g_ht4, ht4_, ht4_mask_),
-                   criterion(g_paf4, paf4_, paf4_mask_),
+                   criterion(r_ht4, ht4_, ht4_mask_),
                    criterion(g_ht8, ht8_, ht8_mask_),
-                   criterion(g_paf8, paf8_, paf8_mask_),
+                   criterion(r_ht8, ht8_, ht8_mask_),
                    criterion(g_ht16, ht16_, ht16_mask_),
-                   criterion(g_paf16, paf16_, paf16_mask_)]
+                   criterion(r_ht16, ht16_, ht16_mask_),
+                   criterion(g_paf4, paf4_, paf4_mask_),
+                   criterion(r_paf4, paf4_, paf4_mask_),
+                   criterion(g_paf8, paf8_, paf8_mask_),
+                   criterion(r_paf8, paf8_, paf8_mask_),
+                   criterion(g_paf16, paf16_, paf16_mask_),
+                   criterion(r_paf16, paf16_, paf16_mask_)]
         losses.append(losses_)
         # backward
         if is_train:
@@ -214,9 +220,12 @@ def main():
             rds.append(rd1)
             rds.append(rd2)
     elif version == 3:
-        rds = [Recorder('G-h-04', freq), Recorder('G-p-04', freq), \
-               Recorder('G-h-08', freq), Recorder('G-p-08', freq), \
-               Recorder('G-h-16', freq), Recorder('G-p-16', freq)]
+        rds = [Recorder('G-h-04', freq), Recorder('R-h-04', freq), \
+               Recorder('G-h-08', freq), Recorder('R-h-08', freq), \
+               Recorder('G-h-16', freq), Recorder('R-h-16', freq), \
+               Recorder('G-p-04', freq), Recorder('R-p-04', freq), \
+               Recorder('G-p-08', freq), Recorder('R-p-08', freq), \
+               Recorder('G-p-16', freq), Recorder('R-p-16', freq)]
     else:
         raise RuntimeError('no such version %d'%version)
     # meta info
