@@ -185,67 +185,74 @@ class UpSamplingBlock(gl.HybridBlock):
         return self.body(x)
 
 
-class GlobalHtBlock(gl.HybridBlock):
+class CPNGlobalBlock(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_channel):
-        super(GlobalHtBlock, self).__init__()
+    def __init__(self, num_kps, num_limb, num_channel):
+        super(CPNGlobalBlock, self).__init__()
         with self.name_scope():
-            self.conv1 = ConvBnReLU(num_channel)
-            self.conv4 = ConvBnReLU(num_channel)
-            self.conv8 = ConvBnReLU(num_channel)
-            self.up4 = UpSamplingBlock(num_channel, 4)
-            self.up8 = UpSamplingBlock(num_channel, 8)
-            self.kps = nn.HybridSequential()
-            self.kps.add(ConvBnReLU(num_channel))
-            self.kps.add(ContextBlock(num_channel))
-            self.kps.add(nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu'))
-            self.kps.add(nn.Conv2D(num_kps, kernel_size=1))
+            self.P4 = nn.Conv2D(128, kernel_size=1, activation='relu')   # 1/4
+            self.P8 = nn.Conv2D(128, kernel_size=1, activation='relu')   # 1/8
+            self.P16 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/16
+            self.upx2 = UpSamplingBlock(128, 2)
+            self.T8 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/16 -> 1/8
+            self.T4 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/8 -> 1/4
+            self.Pre4 = nn.HybridSequential()
+            self.Pre4.add(ContextBlock(64), ContextBlock(64), KpsPafBlock(num_kps, num_limb, num_channel))
+            self.Pre8 = nn.HybridSequential()
+            self.Pre8.add(ContextBlock(128), ContextBlock(128), KpsPafBlock(num_kps, num_limb, num_channel))
+            self.Pre16 = nn.HybridSequential()
+            self.Pre16.add(ContextBlock(128), ContextBlock(128), KpsPafBlock(num_kps, num_limb, num_channel))
 
-    def hybrid_forward(self, F, f1, f4, f8):
-        f1 = self.conv1(f1)
-        f4 = self.conv4(f4)
-        f8 = self.conv8(f8)
-        f4 = F.Crop(self.up4(f4), f1)
-        f8 = F.Crop(self.up8(f8), f1)
-        f1 = F.concat(f1, f4, f8)
-        ht = self.kps(f1)
-        return ht
+    def hybrid_forward(self, F, f4, f8, f16):
+        f4 = self.P4(f4)
+        f8 = self.P8(f8)
+        f16 = self.P16(f16)
+        # 1/16
+        ht16, paf16 = self.Pre16(f16)
+        # 1/8
+        u8 = F.Crop(self.upx2(f16), f8)
+        f8 = f8 + self.T8(u8)
+        ht8, paf8 = self.Pre8(f8)
+        # 1/4
+        u4 = F.Crop(self.upx2(f8), f4)
+        f4 = f4 + self.T4(u4)
+        ht4, paf4 = self.Pre4(f4)
+        return f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16
+
+
+class CPNRefineBlock(gl.HybridBlock):
+
+    def __init__(self, num_kps, num_limb, num_channel):
+        super(CPNRefineBlock, self).__init__()
+        with self.name_scope():
+            self.upx2 = UpSamplingBlock(num_channel, 2)
+            self.upx4 = UpSamplingBlock(num_channel, 4)
+            self.feat_trans = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
+            self.pred = nn.HybridSequential()
+            self.pred.add(ContextBlock(num_channel), ContextBlock(num_channel))
+            self.pred.add(KpsPafBlock(num_kps, num_limb, num_channel))
+
+    def hybrid_forward(self, F, f4, f8, f16):
+        u8 = F.Crop(self.upx2(f8), f4)
+        u16 = F.Crop(self.upx4(f16), f4)
+        x = F.concat(f4, u8, u16)
+        x = self.feat_trans(x)
+        ht, paf = self.pred(x)
+        return ht, paf
 
 
 class CascadePoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_stage, num_channel):
+    def __init__(self, num_kps, num_limb, num_channel):
         super(CascadePoseNet, self).__init__(prefix='cpn')
-        self.num_stage = num_stage
-        self.scale = 3
         with self.name_scope():
-            # backbone
             self.backbone = None
-            # feature transfer
-            self.feat_trans = ConvBnReLU(256)
-            # cpm
-            self.cpm = nn.HybridSequential()
-            for _ in range(num_stage):
-                self.cpm.add(CPMBlock(num_kps, num_limb, num_channel, 2))
-            # global
-            self.gl = GlobalHtBlock(num_kps, 64)
+            self.global_net = CPNGlobalBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
-        f2, f4, f8 = self.backbone(x)  # pylint: disable=not-callable
-        f8 = self.feat_trans(f8)
-        feat = f8
-        outs = []
-        for i in range(self.num_stage):
-            feat, ht, paf = self.cpm[i](feat)
-            outs.append([ht, paf])
-            feat = F.concat(feat, f8)
-            # mask
-            if i != self.num_stage - 1:
-                mask = F.exp(self.scale * F.max(ht, axis=1, keepdims=True))
-                feat = F.broadcast_mul(feat, mask)
-        f8 = feat
-        ht = self.gl(x, f4, f8)
-        return ht, outs
+        feats = self.backbone(x)  # pylint: disable=not-callable
+        f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16 = self.global_net(*feats)
+        return ht4, paf4, ht8, paf8, ht16, paf16
 
     def init_backbone(self, creator, featnames, fixed, pretrained=True):
         assert len(featnames) == 3
@@ -259,13 +266,12 @@ class CascadePoseNet(gl.HybridBlock):
         else:
             data = data[np.newaxis]
         batch = mx.nd.array(data, ctx=ctx)
-        ht, out = self(batch)
-        idx = -1
-        heatmap = ht[0].asnumpy().astype('float64')
-        paf = out[idx][1][0].asnumpy().astype('float64')
+        _, out = self(batch)
+        heatmap = out[0][0].asnumpy().astype('float64')
+        paf = out[1][0].asnumpy().astype('float64')
         if flip:
-            heatmap_flip = ht[1].asnumpy().astype('float64')
-            paf_flip = out[idx][1][1].asnumpy().astype('float64')
+            heatmap_flip = out[0][1].asnumpy().astype('float64')
+            paf_flip = out[1][1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
 
@@ -383,7 +389,7 @@ def flip_prediction(ht, ht_flip, paf, paf_flip):
 
 
 def parse_from_name_v2(name):
-    # name = /path/to/V2.default-vgg16-S5-C64-BS16-adam-0100.params
+    # name = /path/to/V2.default-vgg16-S5-C64-C2-BS16-adam-0100.params
     name = os.path.basename(name)
     name = os.path.splitext(name)[0]
     ps = name.split('-')
@@ -391,10 +397,11 @@ def parse_from_name_v2(name):
     backbone = ps[1]
     stages = int(ps[2][1:])
     channels = int(ps[3][1:])
-    batch_size = int(ps[4][2:])
-    optim = ps[5]
-    epoch = int(ps[6])
-    return prefix, backbone, stages, channels, batch_size, optim, epoch
+    contexts = int(ps[4][1:])
+    batch_size = int(ps[5][2:])
+    optim = ps[6]
+    epoch = int(ps[7])
+    return prefix, backbone, stages, channels, contexts, batch_size, optim, epoch
 
 
 def parse_from_name_v3(name):
@@ -415,16 +422,16 @@ def load_model(model, version=2):
     num_kps = cfg.NUM_LANDMARK
     num_limb = len(cfg.PAF_LANDMARK_PAIR)
     if version == 2:
-        prefix, backbone, num_stage, num_channel, batch_size, optim, epoch = parse_from_name_v2(model)
-        net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
-        creator, featname, fixed = cfg.BACKBONE_v2[backbone]
+        prefix, backbone, num_stage, num_channel, num_context, batch_size, optim, epoch = parse_from_name_v2(model)
+        net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel, num_context=num_context)
+        creator, featnames, fixed = cfg.BACKBONE_v2[backbone]
     elif version == 3:
-        prefix, backbone, num_stage, num_channel, batch_size, optim, epoch = parse_from_name_v2(model)
-        net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
-        creator, featname, fixed = cfg.BACKBONE_v3[backbone]
+        prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
+        net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
+        creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
     else:
         raise RuntimeError('no such version %d'%version)
-    net.init_backbone(creator, featname, fixed, pretrained=False)
+    net.init_backbone(creator, featnames, fixed, pretrained=False)
     net.load_params(model, mx.cpu(0))
     return net
 

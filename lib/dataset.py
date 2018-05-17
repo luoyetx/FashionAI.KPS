@@ -106,7 +106,58 @@ def get_border(shape, kps, expand=0):
     return (xmin, ymin, xmax, ymax)
 
 
-def get_label(height, width, category, kps):
+def get_label(height, width, category, kps, stride, sigma=7, th=1):
+    grid_x = width // stride
+    grid_y = height // stride
+    # heatmap and mask
+    landmark_idx = cfg.LANDMARK_IDX[category]
+    num_kps = len(kps)
+    ht = np.zeros(shape=(num_kps, grid_y, grid_x))
+    ht_mask = np.zeros(shape=(num_kps, 1, 1))
+    for i, (x, y, v) in enumerate(kps):
+        if i in landmark_idx and v == 1:
+            ht_mask[i] = 1
+            putGaussianMaps(ht[i], x, y, v, stride, sigma)
+            # tx, ty = int(x / stride), int(y / stride)
+            # if tx >=0 and tx < grid_x and ty >= 0 and ty < grid_y:
+            #     ht[i, ty, tx] = 1
+            #     ht[i] = cv2.GaussianBlur(ht[i], (gk, gk), 0)
+            #     am = ht[i].max()
+            #     ht[i] /= am
+    # paf and mask
+    limb = cfg.PAF_LANDMARK_PAIR
+    num_limb = len(limb)
+    paf = np.zeros(shape=(num_limb, grid_y, grid_x))
+    paf_mask = np.zeros(shape=(num_limb, 1, 1))
+    for idx, (idx1, idx2) in enumerate(limb):
+        x1, y1, v1 = kps[idx1]
+        x2, y2, v2 = kps[idx2]
+        if v1 != -1 and v2 != -1:
+            putPafMaps(paf[idx], x1, y1, x2, y2, stride, th)
+            paf_mask[idx] = 1
+    return ht.astype('float32'), ht_mask.astype('float32'), paf.astype('float32'), paf_mask.astype('float32')
+
+
+def get_label_v2(height, width, category, kps):
+    stride = 8
+    sigma = 7
+    th = 1
+    ht8, ht8_mask, paf8, paf8_mask = get_label(height, width, category, kps, stride, sigma, th)
+    return ht8, ht8_mask, paf8, paf8_mask
+
+
+def get_label_v3(height, width, category, kps):
+    strides = [16, 8, 4]
+    sigmas = [7, 7, 7]
+    ths = [1, 1, 1]
+    rs = []
+    for stride, sigma, th in zip(strides, sigmas, ths):
+        r = get_label(height, width, category, kps, stride, sigma, th)
+        rs.append(r)
+    return rs
+
+
+def get_label_old(height, width, category, kps):
     strides = [1, 8]
     gks = [15, 3]
     sigmas = [7, 7]
@@ -156,10 +207,10 @@ def get_label(height, width, category, kps):
 
 class FashionAIKPSDataSet(gl.data.Dataset):
 
-    def __init__(self, df, need_ht=True, is_train=True):
+    def __init__(self, df, version=2, is_train=True):
         self.img_dir = cfg.DATA_DIR
         self.is_train = is_train
-        self.need_ht = need_ht
+        self.version = version
         # img path
         self.img_lst = df['image_id'].tolist()
         self.category = df['image_category'].tolist()
@@ -185,15 +236,15 @@ class FashionAIKPSDataSet(gl.data.Dataset):
         img = process_cv_img(img)
         self.cur_kps = kps  # for debug and show
         # get label
-        hts, hts_mask, pafs, pafs_mask = get_label(height, width, category, kps)
-        ht1, ht8 = hts
-        ht1_mask, ht8_mask, = hts_mask
-        paf1, paf8 = pafs
-        paf1_mask, paf8_mask, = pafs_mask
-        if not self.need_ht:
+        if self.version == 2:
+            ht8, ht8_mask, paf8, paf8_mask = get_label_v2(height, width, category, kps)
             return img, ht8, ht8_mask, paf8, paf8_mask
         else:
-            return img, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask
+            r16, r8, r4 = get_label_v3(height, width, category, kps)
+            ht4, ht4_mask, paf4, paf4_mask = r4
+            ht8, ht8_mask, paf8, paf8_mask = r8
+            ht16, ht16_mask, paf16, paf16_mask = r16
+            return img, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask, ht16, ht16_mask, paf16, paf16_mask
 
     def __len__(self):
         return len(self.img_lst)
@@ -238,42 +289,33 @@ class FashionAIDetDataSet(gl.data.Dataset):
         return len(self.img_lst)
 
 
-def show_det(args):
-    pass
-
-
-def show_kps(args):
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--type', type=str, default='train', choices=['train', 'test'])
+    args = parser.parse_args()
+    print(args)
+    np.random.seed(0)
     df = pd.read_csv(os.path.join(cfg.DATA_DIR, 'train.csv'))
-    dataset = FashionAIKPSDataSet(df, is_train=args.type == 'train')
+    dataset = FashionAIKPSDataSet(df, version=3, is_train=args.type == 'train')
     print('DataSet Size', len(dataset))
     for idx, packet in enumerate(dataset):
         # unpack
-        data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
+        data, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask, ht16, ht16_mask, paf16, paf16_mask = packet
 
         img = reverse_to_cv_img(data)
         kps = dataset.cur_kps
         category = dataset.category[idx]
         cv2.imshow("kps", draw_kps(img, kps))
-        cv2.imshow('h1', draw_heatmap(img, ht1.max(axis=0)))
+        cv2.imshow('h4', draw_heatmap(img, ht4.max(axis=0)))
         cv2.imshow('h8', draw_heatmap(img, ht8.max(axis=0)))
+        cv2.imshow('h16', draw_heatmap(img, ht16.max(axis=0)))
+        cv2.imshow('paf4', draw_paf(img, paf4))
         cv2.imshow('paf8', draw_paf(img, paf8))
+        cv2.imshow('paf16', draw_paf(img, paf16))
 
         key = cv2.waitKey(0)
         if key == 27:
             break
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--type', type=str, default='train', choices=['train', 'test'])
-    parser.add_argument('--dataset', type=str, default='kps', choices=['det', 'kps', 'patch'])
-    args = parser.parse_args()
-    print(args)
-    np.random.seed(0)
-    if args.dataset == 'det':
-        show_det(args)
-    elif args.dataset == 'kps':
-        show_kps(args)
 
 
 if __name__ == '__main__':

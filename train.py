@@ -65,28 +65,35 @@ def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
 
 
 def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
-    data, ht1, ht1_mask, ht8, ht8_mask, paf8, paf8_mask = packet
+    data, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask, ht16, ht16_mask, paf16, paf16_mask = packet
+    ht = [ht4, ht8, ht16]
+    paf = [paf4, paf8, paf16]
+    ht_mask = [ht4_mask, ht8_mask, ht16_mask]
+    paf_mask = [paf4_mask, paf8_mask, paf16_mask]
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
-    ht1 = gl.utils.split_and_load(ht1, ctx)
-    ht1_mask = gl.utils.split_and_load(ht1_mask, ctx)
-    ht8 = gl.utils.split_and_load(ht8, ctx)
-    ht8_mask = gl.utils.split_and_load(ht8_mask, ctx)
-    paf8 = gl.utils.split_and_load(paf8 ,ctx)
-    paf8_mask = gl.utils.split_and_load(paf8_mask ,ctx)
+    ht = [gl.utils.split_and_load(x, ctx) for x in ht]
+    paf = [gl.utils.split_and_load(x, ctx) for x in paf]
+    ht_mask = [gl.utils.split_and_load(x, ctx) for x in ht_mask]
+    paf_mask = [gl.utils.split_and_load(x, ctx) for x in paf_mask]
     # run
     ag.set_recording(is_train)
     ag.set_training(is_train)
     losses = []
-    for data_, ht1_, ht8_, paf8_, ht1_mask_, ht8_mask_, paf8_mask_ in zip(data, ht1, ht8, paf8, ht1_mask, ht8_mask, paf8_mask):
+    for idx, data_ in enumerate(data):
         # forward
-        gl_, out_ = net(data_)
-        losses_ = []
-        num_stage = len(out_)
-        for i in range(num_stage):
-            losses_.append(criterion(out_[i][0], ht8_, ht8_mask_))
-            losses_.append(criterion(out_[i][1], paf8_, paf8_mask_))
-        losses_.append(criterion(gl_, ht1_, ht1_mask_))
+        g_ht4, g_paf4, g_ht8, g_paf8, g_ht16, g_paf16 = net(data_)
+        ht4_, ht8_, ht16_ = [h[idx] for h in ht]
+        paf4_, paf8_, paf16_ = [p[idx] for p in paf]
+        ht4_mask_, ht8_mask_, ht16_mask_ = [hm[idx] for hm in ht_mask]
+        paf4_mask_, paf8_mask_, paf16_mask_ = [pm[idx] for pm in paf_mask]
+        # loss
+        losses_ = [criterion(g_ht4, ht4_, ht4_mask_),
+                   criterion(g_paf4, paf4_, paf4_mask_),
+                   criterion(g_ht8, ht8_, ht8_mask_),
+                   criterion(g_paf8, paf8_, paf8_mask_),
+                   criterion(g_ht16, ht16_, ht16_mask_),
+                   criterion(g_paf16, paf16_, paf16_mask_)]
         losses.append(losses_)
         # backward
         if is_train:
@@ -126,6 +133,7 @@ def main():
     parser.add_argument('--num-stage', type=int, default=3)
     parser.add_argument('--num-channel', type=int, default=256)
     parser.add_argument('--num-context', type=int, default=2)
+    parser.add_argument('--kps-model', type=str, default='')
     args = parser.parse_args()
     # seed
     mx.random.seed(args.seed)
@@ -149,9 +157,9 @@ def main():
     num_context = args.num_context
     version = args.version
     if version == 2:
-        base_name = 'V2.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
+        base_name = 'V2.%s-%s-S%d-C%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, num_context, batch_size, optim)
     elif version == 3:
-        base_name = 'V3.%s-%s-S%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, batch_size, optim)
+        base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     else:
         raise RuntimeError('no such version %d'%version)
     filename = './tmp/%s.log' % base_name
@@ -160,9 +168,8 @@ def main():
     # data
     df_train = pd.read_csv(os.path.join(data_dir, 'train.csv'))
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
-    need_ht = True if version == 3 else False
-    traindata = FashionAIKPSDataSet(df_train, need_ht=need_ht, is_train=True)
-    testdata = FashionAIKPSDataSet(df_test, need_ht=need_ht, is_train=False)
+    traindata = FashionAIKPSDataSet(df_train, version=version, is_train=True)
+    testdata = FashionAIKPSDataSet(df_test, version=version, is_train=False)
     trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
     testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
     epoch_size = len(trainloader)
@@ -172,17 +179,17 @@ def main():
         num_limb = len(cfg.PAF_LANDMARK_PAIR)
         if version == 2:
             net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel, num_context=num_context)
-            creator, featname, fixed = cfg.BACKBONE_v2[backbone]
+            creator, featnames, fixed = cfg.BACKBONE_v2[backbone]
         elif version == 3:
-            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel)
-            creator, featname, fixed = cfg.BACKBONE_v3[backbone]
+            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
+            creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
         else:
             raise RuntimeError('no such version %d'%version)
-        net.init_backbone(creator, featname, fixed, pretrained=True)
         net.initialize(mx.init.Normal(), ctx=ctx)
     else:
         logger.info('Load net from %s', model_path)
         net = load_model(model_path, version=version)
+    net.init_backbone(creator, featnames, fixed, pretrained=True)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     criterion = SumL2Loss()
@@ -207,13 +214,9 @@ def main():
             rds.append(rd1)
             rds.append(rd2)
     elif version == 3:
-        rds = []
-        for i in range(num_stage):
-            rd1 = Recorder('h-%d' % i, freq)
-            rd2 = Recorder('p-%d' % i, freq)
-            rds.append(rd1)
-            rds.append(rd2)
-        rds.append(Recorder('Global', freq))
+        rds = [Recorder('G-h-04', freq), Recorder('G-p-04', freq), \
+               Recorder('G-h-08', freq), Recorder('G-p-08', freq), \
+               Recorder('G-h-16', freq), Recorder('G-p-16', freq)]
     else:
         raise RuntimeError('no such version %d'%version)
     # meta info
