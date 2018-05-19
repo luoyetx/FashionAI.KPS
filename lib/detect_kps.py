@@ -34,7 +34,7 @@ def predict_missing_with_center(img, kps, category):
     return kps
 
 
-def detect_kps(img, heatmap, paf, category):
+def detect_kps_v1(img, heatmap, paf, category):
     h, w = img.shape[:2]
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
@@ -120,3 +120,36 @@ def detect_kps(img, heatmap, paf, category):
     # missing
     kps = predict_missing_with_center(img, kps, category)
     return kps
+
+
+def detect_kps_v2(img, heatmap, paf, category):
+    h, w = img.shape[:2]
+    heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
+    landmark_idx = cfg.LANDMARK_IDX[category]
+    num_ldm = cfg.NUM_LANDMARK
+    sigma = 1
+    thres1 = 0.1
+    # peaks
+    kps = np.zeros((num_ldm, 3))
+    kps[:] = -1
+    for idx in landmark_idx:
+        ht_ori = heatmap[:, :, idx]
+        #ht = gaussian_filter(ht_ori, sigma=sigma)
+        ht = cv2.GaussianBlur(ht_ori, (7, 7), 0)
+        mask = np.zeros_like(ht)
+        pickPeeks(ht, mask, thres1)
+        peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
+        peak = np.array([[x[0], x[1], ht_ori[x[1], x[0]]] for x in peak])
+        if len(peak) == 0:
+            continue
+        peak = peak[np.argsort(peak[:, 2])[::-1]]
+        x, y, s = peak[0]
+        kps[idx, 0] = x
+        kps[idx, 1] = y
+        kps[idx, 2] = 1
+    # missing
+    kps = predict_missing_with_center(img, kps, category)
+    return kps
+
+
+detect_kps = detect_kps_v2

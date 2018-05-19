@@ -25,10 +25,21 @@ df_test_b['image_id'] = 'r1-test-b/' + df_test_b['image_id']
 # split train and val
 df = pd.concat([df, df_warmup, df_test_a, df_test_b])
 df = df.sample(frac=1, random_state=666).reset_index(drop=True)
+
+# test_num = 700
+# dfs = [df[df['image_category'] == cate] for cate in cfg.CATEGORY]
+# df_train = [df[:-test_num] for df in dfs]
+# df_test = [df[-test_num:] for df in dfs]
+# df_train = pd.concat(df_train)
+# df_test = pd.concat(df_test)
+# df_train = df_train.sample(frac=1, random_state=666).reset_index(drop=True)
+# df_test = df_test.sample(frac=1, random_state=666).reset_index(drop=True)
+
 train_ratio = 0.95
 train_num = int(len(df) * train_ratio)
 df_train = df[:train_num]
 df_test = df[train_num:]
+
 out = os.path.join(data_dir, 'train.csv')
 df_train.to_csv(out, index=False)
 out = os.path.join(data_dir, 'val.csv')

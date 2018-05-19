@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from lib.model import load_model, multi_scale_predict
-from lib.utils import draw_heatmap, draw_kps, draw_paf, crop_patch_refine
+from lib.utils import draw_heatmap, draw_kps, draw_paf
 from lib.detect_kps import detect_kps
 from lib.config import cfg
 
@@ -18,18 +18,18 @@ def calc_error(kps_pred, kps_gt, category):
     dist = lambda dx, dy: np.sqrt(np.square(dx) + np.square(dy))
     idx1, idx2 = cfg.EVAL_NORMAL_IDX[category]
     if kps_gt[idx1, 2] == -1 or kps_gt[idx2, 2] == -1:
-        return 0, False
+        return 0, None, False
     norm = dist(kps_gt[idx1, 0] - kps_gt[idx2, 0], kps_gt[idx1, 1] - kps_gt[idx2, 1])
-    keep = kps_gt[:, 2] == 1
-    kps_gt = kps_gt[keep]
-    kps_pred = kps_pred[keep]
-    if keep.sum() == 0:
+    idx = np.where(kps_gt[:, 2] == 1)[0]
+    kps_gt = kps_gt[idx]
+    kps_pred = kps_pred[idx]
+    if len(idx) == 0:
         # all occ
-        return 0, False
+        return 0, None, False
     error = dist(kps_pred[:, 0] - kps_gt[:, 0], kps_pred[:, 1] - kps_gt[:, 1])
     error[kps_pred[:, 2] == -1] = norm  # fill missing with norm, so error = 1
     error = error / norm
-    return error, True
+    return error, idx, True
 
 
 def read_csv(path):
@@ -50,8 +50,8 @@ def read_csv(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gt', type=str, default='./data/val.csv')
-    parser.add_argument('--pred', type=str, default='./result/val_result.csv')
-    parser.add_argument('--th', type=float, default=0.05)
+    parser.add_argument('--pred', type=str, default='./result/tmp_val_result.csv')
+    parser.add_argument('--th', type=float, default=0.04)
     parser.add_argument('--model', type=str)
     parser.add_argument('--version', type=int, default=2)
     args = parser.parse_args()
@@ -70,22 +70,27 @@ def main():
     th = args.th
 
     num_category = len(cfg.CATEGORY)
-    result = [[] for i in range(num_category)]
+    num_landmark = cfg.NUM_LANDMARK
+    result = [[] for _ in range(num_category)]
+    kps_result = [[] for _ in range(num_landmark)]
     for img_id, gt, pred, cate in zip(img_lst, kps_gt, kps_pred, category):
         cate_idx = cfg.CATEGORY.index(cate)
-        err, state = calc_error(pred, gt, cate)
+        err, idx, state = calc_error(pred, gt, cate)
         if state:
             result[cate_idx].append(err)
+            for i, e in zip(idx, err):
+                kps_result[i].append(e)
             if args.model and err.mean() > th:
                 # predict
                 img = cv2.imread('./data/' + img_id)
                 heatmap, paf = multi_scale_predict(net, ctx, img, True)
                 pred = detect_kps(img, heatmap, paf, cate)
                 print('-------------------------')
-                keep = np.where(gt[:, 2] == 1)[0]
-                for i1, i2 in zip(keep, err):
-                    print(i1, i2, gt[i1, :2], pred[i1, :2])
-                print('mean', err.mean())
+                for i, e in zip(idx, err):
+                    print(i, e, gt[i, :2], pred[i, :2])
+                print('mean1', err.mean())
+                err, state = calc_error(pred, gt, cate)
+                print('mean2', err.mean())
                 print('-------------------------')
                 # show
                 landmark_idx = cfg.LANDMARK_IDX[cate]
@@ -97,7 +102,11 @@ def main():
                 key = cv2.waitKey(0)
                 if key == 27:
                     break
-
+    # per landmark
+    for i in range(num_landmark):
+        err = np.array(kps_result[i]).mean()
+        print('Average Error for %d: %f' % (i, err))
+    # per category
     result = [np.hstack(_) for _ in result]
     for i in range(num_category):
         category = cfg.CATEGORY[i]

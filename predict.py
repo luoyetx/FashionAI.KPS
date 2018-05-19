@@ -15,7 +15,7 @@ from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger
 from lib.detect_kps import detect_kps
 
 
-file_pattern = './result/tmp_%s_result_%d.csv'
+file_pattern = './result/%s_%s_result_%d.csv'
 
 
 def work_func(df, idx, args):
@@ -59,7 +59,7 @@ def work_func(df, idx, args):
         if i % 100 == 0:
             logger.info('Worker %d process %d samples', idx, i + 1)
     # save
-    fn = file_pattern % (args.type, idx)
+    fn = file_pattern % (args.prefix, args.type, idx)
     with open(fn, 'w') as fout:
         header = 'image_id,image_category,neckline_left,neckline_right,center_front,shoulder_left,shoulder_right,armpit_left,armpit_right,waistline_left,waistline_right,cuff_left_in,cuff_left_out,cuff_right_in,cuff_right_out,top_hem_left,top_hem_right,waistband_left,waistband_right,hemline_left,hemline_right,crotch,bottom_left_in,bottom_left_out,bottom_right_in,bottom_right_out\n'
         fout.write(header)
@@ -81,6 +81,7 @@ def main():
     parser.add_argument('--multi-scale', action='store_true')
     parser.add_argument('--num-worker', type=int, default=1)
     parser.add_argument('--type', type=str, default='val', choices=['val', 'test'])
+    parser.add_argument('--prefix', type=str, default='tmp')
     args = parser.parse_args()
     print(args)
     # data
@@ -102,8 +103,8 @@ def main():
     for worker in workers:
         worker.join()
     # merge
-    result = pd.concat([pd.read_csv(file_pattern % (args.type, i)) for i in range(num_worker)])
-    result.to_csv('./result/%s_result.csv' % args.type, index=False)
+    result = pd.concat([pd.read_csv(file_pattern % (args.prefix, args.type, i)) for i in range(num_worker)])
+    result.to_csv('./result/%s_%s_result.csv' % (args.prefix, args.type), index=False)
 
 
 if __name__ == '__main__':

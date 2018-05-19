@@ -279,15 +279,6 @@ public 0.0554
 - v2.31 V2.mexpo-resnet50-S3-C256-BS24-adam-0055.params, no mask to feat, test err 2.086
 
 ```
-Average Error for blouse: 0.038934
-Average Error for skirt: 0.034857
-Average Error for outwear: 0.045177
-Average Error for dress: 0.042346
-Average Error for trousers: 0.041467
-Total Average Error 0.041234
-```
-
-```
 Average Error for blouse: 0.037986
 Average Error for skirt: 0.031357
 Average Error for outwear: 0.043468
@@ -353,12 +344,140 @@ public 0.0388
 - v2.36 V2.context3-resnet50-S3-C256-C3-BS24-adam-0070.params, test err 1.339
 
 ```
+Average Error for 0: 0.027584
+Average Error for 1: 0.028100
+Average Error for 2: 0.028959
+Average Error for 3: 0.030314
+Average Error for 4: 0.031895
+Average Error for 5: 0.055038
+Average Error for 6: 0.058547
+Average Error for 7: 0.053436
+Average Error for 8: 0.057075
+Average Error for 9: 0.037626
+Average Error for 10: 0.039014
+Average Error for 11: 0.044090
+Average Error for 12: 0.044049
+Average Error for 13: 0.038228
+Average Error for 14: 0.039460
+Average Error for 15: 0.026199
+Average Error for 16: 0.025881
+Average Error for 17: 0.034650
+Average Error for 18: 0.032838
+Average Error for 19: 0.063997
+Average Error for 20: 0.036305
+Average Error for 21: 0.033759
+Average Error for 22: 0.037222
+Average Error for 23: 0.031461
 Average Error for blouse: 0.036703
 Average Error for skirt: 0.028923
 Average Error for outwear: 0.039063
 Average Error for dress: 0.039211
 Average Error for trousers: 0.037146
 Total Average Error 0.037209
+```
+
+public 0.0381
+
+- v3.1 V3.test-resnet50-C256-BS18-adam-0031.params
+
+```
+G-h-04 = 5.503272
+R-h-04 = 5.410425
+G-h-08 = 1.586563
+R-h-08 = 1.385941
+G-h-16 = 0.487300
+R-h-16 = 0.433932
+G-p-04 = 106.700837
+R-p-04 = 104.853014
+G-p-08 = 41.696519
+R-p-08 = 37.243585
+G-p-16 = 19.133359
+R-p-16 = 15.260324
+```
+
+```
+Average Error for 0: 0.027609
+Average Error for 1: 0.028415
+Average Error for 2: 0.029838
+Average Error for 3: 0.031052
+Average Error for 4: 0.031315
+Average Error for 5: 0.056688
+Average Error for 6: 0.059660
+Average Error for 7: 0.055281
+Average Error for 8: 0.058379
+Average Error for 9: 0.036900
+Average Error for 10: 0.036786
+Average Error for 11: 0.042185
+Average Error for 12: 0.039063
+Average Error for 13: 0.036154
+Average Error for 14: 0.040996
+Average Error for 15: 0.025382
+Average Error for 16: 0.024123
+Average Error for 17: 0.035997
+Average Error for 18: 0.037289
+Average Error for 19: 0.065110
+Average Error for 20: 0.038688
+Average Error for 21: 0.036447
+Average Error for 22: 0.040637
+Average Error for 23: 0.036677
+Average Error for blouse: 0.036655
+Average Error for skirt: 0.029832
+Average Error for outwear: 0.039259
+Average Error for dress: 0.037934
+Average Error for trousers: 0.039136
+Total Average Error 0.037335
+```
+
+public 0.0371
+
+- v3.2 V3.test-resnet50-C256-BS18-adam-0041.params
+
+```
+G-h-04 = 5.315247
+R-h-04 = 5.224319
+G-h-08 = 1.521610
+R-h-08 = 1.338649
+G-h-16 = 0.464119
+R-h-16 = 0.414197
+G-p-04 = 104.350060
+R-p-04 = 102.596077
+G-p-08 = 40.705234
+R-p-08 = 36.354065
+G-p-16 = 18.629567
+R-p-16 = 14.907007
+```
+
+```
+Average Error for 0: 0.026701
+Average Error for 1: 0.027429
+Average Error for 2: 0.029056
+Average Error for 3: 0.030637
+Average Error for 4: 0.030788
+Average Error for 5: 0.055129
+Average Error for 6: 0.058358
+Average Error for 7: 0.054421
+Average Error for 8: 0.056657
+Average Error for 9: 0.035908
+Average Error for 10: 0.035950
+Average Error for 11: 0.041294
+Average Error for 12: 0.037208
+Average Error for 13: 0.034756
+Average Error for 14: 0.037447
+Average Error for 15: 0.025070
+Average Error for 16: 0.024479
+Average Error for 17: 0.034003
+Average Error for 18: 0.035534
+Average Error for 19: 0.064829
+Average Error for 20: 0.033768
+Average Error for 21: 0.037104
+Average Error for 22: 0.040102
+Average Error for 23: 0.034142
+Average Error for blouse: 0.035472
+Average Error for skirt: 0.029095
+Average Error for outwear: 0.037487
+Average Error for dress: 0.037153
+Average Error for trousers: 0.037899
+Total Average Error 0.036142
 ```
 
 public
