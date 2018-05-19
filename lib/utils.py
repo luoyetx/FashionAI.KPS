@@ -6,7 +6,6 @@ import datetime
 import cv2
 import mxnet as mx
 import numpy as np
-from scipy.ndimage.filters import gaussian_filter
 import seaborn as sns
 
 from lib.config import cfg
@@ -48,23 +47,6 @@ def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
         patch[sy:sy+vh, sx:sx+vw] = img[vy1:vy2, vx1:vx2]
         return patch
     return img[y1:y2, x1:x2]
-
-
-def crop_patch_refine(img, kps, size):
-    num_kps = len(kps)
-    data = np.zeros(shape=(3*num_kps, size, size))
-    mask = np.zeros(shape=(num_kps, 2))
-    l = size // 2
-    for i, (x, y, v) in enumerate(kps):
-        if v != -1:
-            x, y = int(x), int(y)
-            bbox = (x - l, y - l, x + l, y + l)
-            patch = crop_patch(img, bbox)
-            if patch is not None:
-                patch = process_cv_img(patch)
-                data[3*i:3*i+3] = patch
-                mask[i] = 1
-    return data, mask
 
 
 def draw_kps(im, kps):

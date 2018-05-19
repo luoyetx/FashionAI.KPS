@@ -2,7 +2,6 @@ from __future__ import print_function, division
 
 import cv2
 import numpy as np
-from scipy.ndimage.filters import gaussian_filter
 
 from lib.config import cfg
 
@@ -40,7 +39,6 @@ def detect_kps_v1(img, heatmap, paf, category):
     paf = cv2.resize(paf.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = len(landmark_idx)
-    sigma = 1
     thres1 = 0.1
     num_mid = 10
     thres2 = 0.1
@@ -49,8 +47,7 @@ def detect_kps_v1(img, heatmap, paf, category):
     heatmap = heatmap[:, :, landmark_idx]
     for i in range(num_ldm):
         ht_ori = heatmap[:, :, i]
-        ht = gaussian_filter(ht_ori, sigma=sigma)
-        #ht = cv2.GaussianBlur(ht_ori, (7, 7), 0)
+        ht = cv2.GaussianBlur(ht_ori, (7, 7), 0)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)
         peak = zip(np.nonzero(mask)[1], np.nonzero(mask)[0]) # note reverse
@@ -127,14 +124,12 @@ def detect_kps_v2(img, heatmap, paf, category):
     heatmap = cv2.resize(heatmap.transpose((1, 2, 0)), (w, h), interpolation=cv2.INTER_CUBIC)
     landmark_idx = cfg.LANDMARK_IDX[category]
     num_ldm = cfg.NUM_LANDMARK
-    sigma = 1
     thres1 = 0.1
     # peaks
     kps = np.zeros((num_ldm, 3))
     kps[:] = -1
     for idx in landmark_idx:
         ht_ori = heatmap[:, :, idx]
-        #ht = gaussian_filter(ht_ori, sigma=sigma)
         ht = cv2.GaussianBlur(ht_ori, (7, 7), 0)
         mask = np.zeros_like(ht)
         pickPeeks(ht, mask, thres1)

@@ -81,15 +81,18 @@ def main():
             for i, e in zip(idx, err):
                 kps_result[i].append(e)
             if args.model and err.mean() > th:
-                # predict
-                img = cv2.imread('./data/' + img_id)
-                heatmap, paf = multi_scale_predict(net, ctx, img, True)
-                pred = detect_kps(img, heatmap, paf, cate)
+                # ori
                 print('-------------------------')
                 for i, e in zip(idx, err):
                     print(i, e, gt[i, :2], pred[i, :2])
                 print('mean1', err.mean())
-                err, state = calc_error(pred, gt, cate)
+                # model
+                img = cv2.imread('./data/' + img_id)
+                heatmap, paf = multi_scale_predict(net, ctx, img, True)
+                pred = detect_kps(img, heatmap, paf, cate)
+                err, idx, state = calc_error(pred, gt, cate)
+                for i, e in zip(idx, err):
+                    print(i, e, gt[i, :2], pred[i, :2])
                 print('mean2', err.mean())
                 print('-------------------------')
                 # show

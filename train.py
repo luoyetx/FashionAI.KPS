@@ -192,10 +192,10 @@ def main():
         else:
             raise RuntimeError('no such version %d'%version)
         net.initialize(mx.init.Normal(), ctx=ctx)
+        net.init_backbone(creator, featnames, fixed, pretrained=True)
     else:
         logger.info('Load net from %s', model_path)
         net = load_model(model_path, version=version)
-    net.init_backbone(creator, featnames, fixed, pretrained=True)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     criterion = SumL2Loss()

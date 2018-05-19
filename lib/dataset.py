@@ -10,7 +10,7 @@ import numpy as np
 from imgaug import augmenters as iaa
 
 from lib.config import cfg
-from lib.utils import process_cv_img, reverse_to_cv_img, crop_patch, crop_patch_refine
+from lib.utils import process_cv_img, reverse_to_cv_img, crop_patch
 from lib.utils import draw_heatmap, draw_kps, draw_paf, draw_box
 
 import pyximport

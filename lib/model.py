@@ -8,7 +8,7 @@ from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
 from lib.config import cfg
-from lib.utils import process_cv_img, crop_patch_refine
+from lib.utils import process_cv_img
 
 
 def freeze_bn(block):
@@ -183,62 +183,6 @@ class UpSamplingBlock(gl.HybridBlock):
 
     def hybrid_forward(self, F, x):
         return self.body(x)
-
-
-class CPNGlobalBlock(gl.HybridBlock):
-
-    def __init__(self, num_kps, num_limb, num_channel):
-        super(CPNGlobalBlock, self).__init__()
-        with self.name_scope():
-            self.P4 = nn.Conv2D(128, kernel_size=1, activation='relu')   # 1/4
-            self.P8 = nn.Conv2D(128, kernel_size=1, activation='relu')   # 1/8
-            self.P16 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/16
-            self.upx2 = UpSamplingBlock(128, 2)
-            self.T8 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/16 -> 1/8
-            self.T4 = nn.Conv2D(128, kernel_size=1, activation='relu')  # 1/8 -> 1/4
-            self.Pre4 = nn.HybridSequential()
-            self.Pre4.add(ContextBlock(64), ContextBlock(64), KpsPafBlock(num_kps, num_limb, num_channel))
-            self.Pre8 = nn.HybridSequential()
-            self.Pre8.add(ContextBlock(128), ContextBlock(128), KpsPafBlock(num_kps, num_limb, num_channel))
-            self.Pre16 = nn.HybridSequential()
-            self.Pre16.add(ContextBlock(128), ContextBlock(128), KpsPafBlock(num_kps, num_limb, num_channel))
-
-    def hybrid_forward(self, F, f4, f8, f16):
-        f4 = self.P4(f4)
-        f8 = self.P8(f8)
-        f16 = self.P16(f16)
-        # 1/16
-        ht16, paf16 = self.Pre16(f16)
-        # 1/8
-        u8 = F.Crop(self.upx2(f16), f8)
-        f8 = f8 + self.T8(u8)
-        ht8, paf8 = self.Pre8(f8)
-        # 1/4
-        u4 = F.Crop(self.upx2(f8), f4)
-        f4 = f4 + self.T4(u4)
-        ht4, paf4 = self.Pre4(f4)
-        return f4, f8, f16, ht4, ht8, ht16, paf4, paf8, paf16
-
-
-class CPNRefineBlock(gl.HybridBlock):
-
-    def __init__(self, num_kps, num_limb, num_channel):
-        super(CPNRefineBlock, self).__init__()
-        with self.name_scope():
-            self.upx2 = UpSamplingBlock(num_channel, 2)
-            self.upx4 = UpSamplingBlock(num_channel, 4)
-            self.feat_trans = nn.Conv2D(num_channel, kernel_size=3, padding=1, activation='relu')
-            self.pred = nn.HybridSequential()
-            self.pred.add(ContextBlock(num_channel), ContextBlock(num_channel))
-            self.pred.add(KpsPafBlock(num_kps, num_limb, num_channel))
-
-    def hybrid_forward(self, F, f4, f8, f16):
-        u8 = F.Crop(self.upx2(f8), f4)
-        u16 = F.Crop(self.upx4(f16), f4)
-        x = F.concat(f4, u8, u16)
-        x = self.feat_trans(x)
-        ht, paf = self.pred(x)
-        return ht, paf
 
 
 class CascadePoseNet(gl.HybridBlock):
