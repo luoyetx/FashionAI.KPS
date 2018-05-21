@@ -8,7 +8,7 @@ from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
 
 from lib.config import cfg
-from lib.utils import process_cv_img
+from lib.utils import process_cv_img, crop_patch_refine
 
 
 def freeze_bn(block):
@@ -48,11 +48,11 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
 
 class ConvBnReLU(gl.HybridBlock):
 
-    def __init__(self, num_channel, kernel_size=3, padding=1):
+    def __init__(self, num_channel, kernel_size=3, padding=1, groups=1):
         super(ConvBnReLU, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
-            self.body.add(nn.Conv2D(num_channel, kernel_size=kernel_size, padding=padding, use_bias=False))
+            self.body.add(nn.Conv2D(num_channel, kernel_size=kernel_size, padding=padding, use_bias=False, groups=groups))
             self.body.add(nn.BatchNorm())
             self.body.add(nn.Activation('relu'))
 
@@ -189,6 +189,7 @@ class CascadePoseNet(gl.HybridBlock):
 
     def __init__(self, num_kps, num_limb, num_channel):
         super(CascadePoseNet, self).__init__(prefix='cpn')
+        self.scale = 3
         with self.name_scope():
             self.backbone = None
             self.f4 = ConvBnReLU(256)
@@ -209,7 +210,25 @@ class CascadePoseNet(gl.HybridBlock):
             self.context4.add(ContextBlock(64), ContextBlock(64))
             self.p4_1 = KpsPafBlock(num_kps, num_limb, num_channel)
             self.p4_2 = KpsPafBlock(num_kps, num_limb, num_channel)
-
+            # self.backbone = None
+            # self.f4 = ConvBnReLU(256)
+            # self.f8 = ConvBnReLU(256)
+            # self.f16 = ConvBnReLU(256)
+            # self.upx2 = UpSamplingBlock(256, 2)
+            # self.context16 = nn.HybridSequential()
+            # self.context16.add(ContextBlock(128), ContextBlock(128), ContextBlock(128))
+            # self.context16tofeat = ConvBnReLU(256)
+            # self.p16_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            # self.p16_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            # self.context8 = nn.HybridSequential()
+            # self.context8.add(ContextBlock(128), ContextBlock(128), ContextBlock(128))
+            # self.context8tofeat = ConvBnReLU(256)
+            # self.p8_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            # self.p8_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            # self.context4 = nn.HybridSequential()
+            # self.context4.add(ContextBlock(64), ContextBlock(64), ContextBlock(64))
+            # self.p4_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            # self.p4_2 = KpsPafBlock(num_kps, num_limb, num_channel)
 
     def hybrid_forward(self, F, x):
         f4, f8, f16 = self.backbone(x)  # pylint: disable=not-callable
@@ -218,14 +237,20 @@ class CascadePoseNet(gl.HybridBlock):
         g_ht16, g_paf16 = self.p16_1(f16)
         f16 = self.context16(f16)
         r_ht16, r_paf16 = self.p16_2(f16)
-        # 8
         f16 = self.context16tofeat(f16)
+        mask16 = F.exp(self.scale * F.max(r_ht16, axis=1, keepdims=True))
+        mask16 = F.stop_gradient(mask16)
+        f16 = F.broadcast_mul(f16, mask16)
+        # 8
         f8 = self.f8(f8) + F.Crop(self.upx2(f16), f8)
         g_ht8, g_paf8 = self.p8_1(f8)
         f8 = self.context8(f8)
         r_ht8, r_paf8 = self.p8_2(f8)
-        # 4
         f8 = self.context8tofeat(f8)
+        mask8 = F.exp(self.scale * F.max(r_ht8, axis=1, keepdims=True))
+        mask8 = F.stop_gradient(mask8)
+        f8 = F.broadcast_mul(f8, mask8)
+        # 4
         f4 = self.f4(f4) + F.Crop(self.upx2(f8), f4)
         g_ht4, g_paf4 = self.p4_1(f4)
         f4 = self.context4(f4)
@@ -252,6 +277,66 @@ class CascadePoseNet(gl.HybridBlock):
             paf_flip = g_paf4[1].asnumpy().astype('float64')
             heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
         return heatmap, paf
+
+
+##### model for patch
+
+class PatchRefineNet(gl.HybridBlock):
+
+    def __init__(self, num_kps):
+        super(PatchRefineNet, self).__init__(prefix='patchrefinenet')
+        self.num_kps = num_kps
+        with self.name_scope():
+            self.f1 = nn.HybridSequential()
+            self.f1.add(ConvBnReLU(32*num_kps, groups=num_kps))
+            self.f1.add(ConvBnReLU(32*num_kps, groups=num_kps))
+            self.f2 = nn.HybridSequential()
+            self.f2.add(nn.MaxPool2D())
+            self.f2.add(ConvBnReLU(64*num_kps, groups=num_kps))
+            self.f2.add(ConvBnReLU(64*num_kps, groups=num_kps))
+            self.f4 = nn.HybridSequential()
+            self.f4.add(nn.MaxPool2D())
+            self.f4.add(ConvBnReLU(128*num_kps, groups=num_kps))
+            self.f4.add(ConvBnReLU(128*num_kps, groups=num_kps))
+            self.f8 = nn.HybridSequential()
+            self.f8.add(nn.MaxPool2D())
+            self.f8.add(ConvBnReLU(128*num_kps, groups=num_kps))
+            self.f8.add(ConvBnReLU(128*num_kps, groups=num_kps))
+            self.f4_8up2 = UpSamplingBlock(128*num_kps, 2)
+            self.f4t = ConvBnReLU(128*num_kps, groups=num_kps)
+            self.f2t = ConvBnReLU(64*num_kps, groups=num_kps)
+            self.f2up2 = UpSamplingBlock(64*num_kps, 2)
+            self.f1t = ConvBnReLU(32*num_kps, groups=num_kps)
+            self.pred = nn.HybridSequential()
+            self.pred.add(ConvBnReLU(32*num_kps, groups=num_kps))
+            self.pred.add(nn.Conv2D(num_kps, kernel_size=3, padding=1, groups=num_kps))
+
+    def hybrid_forward(self, F, x):
+        f1 = self.f1(x)
+        f2 = self.f2(f1)
+        f4 = self.f4(f2)
+        f8 = self.f8(f4)
+        u4 = F.Crop(self.f4_8up2(f8), f4)
+        u4 = F.concat(u4, f4)
+        f4 = self.f4t(u4)
+        u2 = F.Crop(self.f4_8up2(f4), f2)
+        u2 = F.concat(u2, f2)
+        f2 = self.f2t(u2)
+        u1 = F.Crop(self.f2up2(f2), f1)
+        u1 = F.concat(u1, f1)
+        f1 = self.f1t(u1)
+        ht = self.pred(f1)
+        return ht
+
+    def predict(self, img, kps, ctx):
+        data, _, _ = crop_patch_refine(img, kps, size=36)
+        data = data[np.newaxis].astype('float32')
+        data = mx.nd.array(data, ctx)
+        offset = self(data)[0].asnumpy()
+        offset = offset.reshape((-1, 2))
+        pred = kps.copy()
+        pred[:, :2] = (pred[:, :2] + offset).astype('int')
+        return pred
 
 
 def multi_scale_predict(net, ctx, img, multi_scale=False):

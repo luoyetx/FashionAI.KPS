@@ -23,20 +23,26 @@ from lib.utils import get_logger, Recorder
 
 class SumL2Loss(gl.loss.Loss):
 
-    def __init__(self, weight=1., batch_axis=0, **kwargs):
+    def __init__(self, ohkm=False, weight=1., batch_axis=0, **kwargs):
         super(SumL2Loss, self).__init__(weight, batch_axis, **kwargs)
+        self.ohkm = ohkm
 
     def hybrid_forward(self, F, pred, label, mask):
         pred = F.broadcast_mul(pred, mask)
         label = F.broadcast_mul(label, mask)
         label = gl.loss._reshape_like(F, label, pred)
         loss = F.square(pred - label)
+        if self.ohkm:
+            mask = F.topk(F.sum(F.reshape(loss, (0, 0, -1)), axis=2), axis=1, k=5, ret_typ='mask')
+            mask = F.reshape(mask, (0, 0, 1, 1))
+            loss = F.broadcast_mul(loss, mask)
         loss = gl.loss._apply_weighting(F, loss, self._weight/2, None)
         return F.sum(loss, axis=self._batch_axis, exclude=True)
 
 
-def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
+def forward_backward_v2(net, criterions, ctx, packet, is_train=True):
     data, ht8, ht8_mask, paf8, paf8_mask = packet
+    criterion, criterion_ohkm = criterions
     # split to gpus
     data = gl.utils.split_and_load(data, ctx)
     ht8 = gl.utils.split_and_load(ht8, ctx)
@@ -64,8 +70,9 @@ def forward_backward_v2(net, criterion, ctx, packet, is_train=True):
     return losses
 
 
-def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
+def forward_backward_v3(net, criterions, ctx, packet, is_train=True):
     data, ht4, ht4_mask, paf4, paf4_mask, ht8, ht8_mask, paf8, paf8_mask, ht16, ht16_mask, paf16, paf16_mask = packet
+    criterion, criterion_ohkm = criterions
     ht = [ht4, ht8, ht16]
     paf = [paf4, paf8, paf16]
     ht_mask = [ht4_mask, ht8_mask, ht16_mask]
@@ -89,11 +96,11 @@ def forward_backward_v3(net, criterion, ctx, packet, is_train=True):
         paf4_mask_, paf8_mask_, paf16_mask_ = [pm[idx] for pm in paf_mask]
         # loss
         losses_ = [criterion(g_ht4, ht4_, ht4_mask_),
-                   criterion(r_ht4, ht4_, ht4_mask_),
+                   criterion_ohkm(r_ht4, ht4_, ht4_mask_),
                    criterion(g_ht8, ht8_, ht8_mask_),
-                   criterion(r_ht8, ht8_, ht8_mask_),
+                   criterion_ohkm(r_ht8, ht8_, ht8_mask_),
                    criterion(g_ht16, ht16_, ht16_mask_),
-                   criterion(r_ht16, ht16_, ht16_mask_),
+                   criterion_ohkm(r_ht16, ht16_, ht16_mask_),
                    criterion(g_paf4, paf4_, paf4_mask_),
                    criterion(r_paf4, paf4_, paf4_mask_),
                    criterion(g_paf8, paf8_, paf8_mask_),
@@ -139,7 +146,7 @@ def main():
     parser.add_argument('--num-stage', type=int, default=3)
     parser.add_argument('--num-channel', type=int, default=256)
     parser.add_argument('--num-context', type=int, default=2)
-    parser.add_argument('--kps-model', type=str, default='')
+    parser.add_argument('--ohkm', action='store_true')
     args = parser.parse_args()
     # seed
     mx.random.seed(args.seed)
@@ -161,6 +168,7 @@ def main():
     num_stage = args.num_stage
     num_channel = args.num_channel
     num_context = args.num_context
+    ohkm = args.ohkm
     version = args.version
     if version == 2:
         base_name = 'V2.%s-%s-S%d-C%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, num_context, batch_size, optim)
@@ -199,7 +207,13 @@ def main():
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     criterion = SumL2Loss()
+    criterion_ohkm = SumL2Loss(ohkm=True)
     criterion.hybridize()
+    criterion_ohkm.hybridize()
+    if ohkm:
+        criterions = (criterion, criterion_ohkm)
+    else:
+        criterions = (criterion, criterion)
     # trainer
     steps = [epoch_size * x for x in steps]
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=lr_decay)
@@ -245,7 +259,7 @@ def main():
         sw.add_scalar('lr', trainer.learning_rate, global_step)
         for batch_idx, packet in enumerate(trainloader):
             # [(l1, l2, ...), (l1, l2, ...)]
-            losses = forward_backward(net, criterion, ctx, packet, is_train=True)
+            losses = forward_backward(net, criterions, ctx, packet, is_train=True)
             trainer.step(batch_size)
             # reduce to [l1, l2, ...]
             ret = reduce_losses(losses)
@@ -268,7 +282,7 @@ def main():
         for rd in rds:
             rd.reset()
         for batch_idx, packet in enumerate(testloader):
-            losses = forward_backward(net, criterion, ctx, packet, is_train=False)
+            losses = forward_backward(net, criterions, ctx, packet, is_train=False)
             ret = reduce_losses(losses)
             for rd, loss in zip(rds, ret):
                 rd.update(loss)

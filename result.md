@@ -480,4 +480,11 @@ Average Error for trousers: 0.037899
 Total Average Error 0.036142
 ```
 
-public
+public 0.0364
+
+
+- tmp
+
+5.244 -> 0.036178 -> 0.0362
+5.241 -> 0.036167 -> 0.0363
+5.270 -> 0.036001 -> 0.0363

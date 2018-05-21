@@ -25,7 +25,7 @@ def reverse_to_cv_img(data):
 
 
 def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
-    height, width = img.shape[:-1]
+    height, width, channel = img.shape
     x1, y1, x2, y2 = bbox
     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
     if x1 >= width or y1 >= height or x2 <= 0 or y2 <= 0:
@@ -34,8 +34,9 @@ def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
     if x1 < 0 or y1 < 0 or x2 > width or y2 > height:
         # out of boundary, still crop the face
         h, w = y2 - y1, x2 - x1
-        patch = np.zeros((h, w, 3), dtype=np.uint8)
-        patch[:, :] = fill_value
+        patch = np.zeros((h, w, channel), dtype=img.dtype)
+        if channel == 3:
+            patch[:, :] = fill_value
         vx1 = 0 if x1 < 0 else x1
         vy1 = 0 if y1 < 0 else y1
         vx2 = width if x2 > width else x2
@@ -47,6 +48,27 @@ def crop_patch(img, bbox, fill_value=cfg.FILL_VALUE):
         patch[sy:sy+vh, sx:sx+vw] = img[vy1:vy2, vx1:vx2]
         return patch
     return img[y1:y2, x1:x2]
+
+
+def crop_patch_refine(img, kps, size, ht1=None):
+    num_kps = len(kps)
+    height, width = img.shape[:2]
+    data = np.zeros(shape=(3*num_kps, size, size))
+    ht = np.zeros(shape=(num_kps, size, size))
+    mask = np.zeros(shape=(num_kps, 1, 1))
+    l = size // 2
+    for i, (x, y, v) in enumerate(kps):
+        if v != -1:
+            x, y = int(x), int(y)
+            bbox = (x - l, y - l, x + l, y + l)
+            patch = crop_patch(img, bbox)
+            if patch is not None:
+                patch = process_cv_img(patch)
+                data[3*i:3*i+3] = patch
+                mask[i] = 1
+                if ht1 is not None:
+                    ht[i] = crop_patch(ht1[i].reshape((height, width, 1)), bbox).reshape((size, size))
+    return data, ht, mask
 
 
 def draw_kps(im, kps):
