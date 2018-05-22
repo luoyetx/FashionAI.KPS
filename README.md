@@ -25,3 +25,16 @@ data
     ├── Annotations
     └── Images
 ```
+
+### Notice
+
+There's a bug in `mxnet/gluon/block.py` in `SymbolBlock`. If you encounter save and load model issue, check a patch below.
+
+```python
+class SymbolBlock(HybridBlock)
+    def __init__(self, outputs, inputs, params=None):
+        super(SymbolBlock, self).__init__(prefix=None, params=None)
+        self._prefix = ''
+        self._params = ParameterDict('', params)
+        self._reg_params = self._params  # <--- add this line
+```

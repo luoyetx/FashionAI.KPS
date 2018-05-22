@@ -11,8 +11,9 @@ import pandas as pd
 
 from lib.config import cfg
 from lib.model import load_model, multi_scale_predict
-from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger
+from lib.utils import draw_heatmap, draw_paf, draw_kps, get_logger, crop_patch
 from lib.detect_kps import detect_kps
+from lib.dataset import get_border
 
 
 file_pattern = './result/%s_%s_result_%d.csv'
@@ -42,6 +43,16 @@ def work_func(df, idx, args):
         # predict
         heatmap, paf = multi_scale_predict(net, ctx, img, multi_scale)
         kps_pred = detect_kps(img, heatmap, paf, category)
+
+        # extra
+        shape = img.shape[:2]
+        bbox = get_border(shape, kps_pred, 0.2)
+        roi = crop_patch(img, bbox)
+        heatmap, paf = multi_scale_predict(net, ctx, roi, multi_scale)
+        kps_pred = detect_kps(roi, heatmap, paf, category)
+        kps_pred[:, 0] += bbox[0]
+        kps_pred[:, 1] += bbox[1]
+
         result.append(kps_pred)
         # show
         if show:

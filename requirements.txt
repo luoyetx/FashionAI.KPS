@@ -1,9 +1,10 @@
 Cython==0.27.3
-numpy==1.14.2
+numpy==1.14.3
 pandas==0.22.0
 imgaug==0.2.5
 easydict==1.7
 seaborn==0.7.1
 tensorboardX==1.1
 opencv-python==3.4.0.12
-mxnet-cu80==1.2.0b20180420
+#mxnet-cu80==1.2.0b20180420
+mxnet-cu80==1.2.0

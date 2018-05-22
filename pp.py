@@ -9,9 +9,10 @@ import numpy as np
 import pandas as pd
 
 from lib.model import load_model, multi_scale_predict
-from lib.utils import draw_heatmap, draw_kps, draw_paf
+from lib.utils import draw_heatmap, draw_kps, draw_paf, crop_patch
 from lib.detect_kps import detect_kps
 from lib.config import cfg
+from lib.dataset import get_border
 
 
 def calc_error(kps_pred, kps_gt, category):
@@ -90,6 +91,16 @@ def main():
                 img = cv2.imread('./data/' + img_id)
                 heatmap, paf = multi_scale_predict(net, ctx, img, True)
                 pred = detect_kps(img, heatmap, paf, cate)
+
+                # extra
+                shape = img.shape[:2]
+                bbox = get_border(shape, pred, 0.2)
+                roi = crop_patch(img, bbox)
+                heatmap, paf = multi_scale_predict(net, ctx, roi, True)
+                pred = detect_kps(roi, heatmap, paf, cate)
+                pred[:, 0] += bbox[0]
+                pred[:, 1] += bbox[1]
+
                 err, idx, state = calc_error(pred, gt, cate)
                 for i, e in zip(idx, err):
                     print(i, e, gt[i, :2], pred[i, :2])
@@ -98,10 +109,10 @@ def main():
                 # show
                 landmark_idx = cfg.LANDMARK_IDX[cate]
                 heatmap = heatmap[landmark_idx].max(axis=0)
-                cv2.imshow('heatmap', draw_heatmap(img, heatmap))
+                cv2.imshow('heatmap', draw_heatmap(roi, heatmap))
                 cv2.imshow('kps_pred', draw_kps(img, pred))
                 cv2.imshow('kps_gt', draw_kps(img, gt))
-                cv2.imshow('paf', draw_paf(img, paf))
+                cv2.imshow('paf', draw_paf(roi, paf))
                 key = cv2.waitKey(0)
                 if key == 27:
                     break
