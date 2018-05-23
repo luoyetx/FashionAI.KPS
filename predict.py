@@ -43,16 +43,6 @@ def work_func(df, idx, args):
         # predict
         heatmap, paf = multi_scale_predict(net, ctx, img, multi_scale)
         kps_pred = detect_kps(img, heatmap, paf, category)
-
-        # extra
-        shape = img.shape[:2]
-        bbox = get_border(shape, kps_pred, 0.2)
-        roi = crop_patch(img, bbox)
-        heatmap, paf = multi_scale_predict(net, ctx, roi, multi_scale)
-        kps_pred = detect_kps(roi, heatmap, paf, category)
-        kps_pred[:, 0] += bbox[0]
-        kps_pred[:, 1] += bbox[1]
-
         result.append(kps_pred)
         # show
         if show:
