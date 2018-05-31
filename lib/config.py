@@ -66,6 +66,10 @@ cfg.BACKBONE_v3 = {
     'resnet101': (gl.model_zoo.vision.resnet101_v1, ['stage1_activation2','stage2_activation3', 'stage3_activation22'], []),
 }
 
+cfg.BACKBONE_v4 = {
+    'resnet50': (gl.model_zoo.vision.resnet50_v1, ['conv1', 'stage1_activation2','stage2_activation3', 'stage3_activation5'], []),
+}
+
 cfg.BACKBONE_Det = {
     'resnet50': (gl.model_zoo.vision.resnet50_v1, ['stage2_activation3', 'stage3_activation5'], []),
 }

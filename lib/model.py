@@ -6,6 +6,7 @@ import numpy as np
 import mxnet as mx
 from mxnet import nd, autograd as ag, gluon as gl
 from mxnet.gluon import nn
+from mxnet.gluon.model_zoo.vision.resnet import BottleneckV1
 
 from lib.config import cfg
 from lib.utils import process_cv_img, crop_patch_refine
@@ -48,11 +49,11 @@ def install_backbone(net, creator, featnames, fixed, pretrained):
 
 class ConvBnReLU(gl.HybridBlock):
 
-    def __init__(self, num_channel, kernel_size=3, padding=1, groups=1):
+    def __init__(self, num_channel, kernel_size=3, groups=1):
         super(ConvBnReLU, self).__init__()
         with self.name_scope():
             self.body = nn.HybridSequential()
-            self.body.add(nn.Conv2D(num_channel, kernel_size=kernel_size, padding=padding, use_bias=False, groups=groups))
+            self.body.add(nn.Conv2D(num_channel, kernel_size=kernel_size, padding=kernel_size // 2, use_bias=False, groups=groups))
             self.body.add(nn.BatchNorm())
             self.body.add(nn.Activation('relu'))
 
@@ -71,6 +72,9 @@ class ContextBlock(gl.HybridBlock):
             self.f5.add(ConvBnReLU(num_channel), ConvBnReLU(num_channel))
             self.f7 = nn.HybridSequential()
             self.f7.add(ConvBnReLU(num_channel), ConvBnReLU(num_channel), ConvBnReLU(num_channel))
+            # self.f3 = ConvBnReLU(num_channel, kernel_size=3)
+            # self.f5 = ConvBnReLU(num_channel, kernel_size=5)
+            # self.f7 = ConvBnReLU(num_channel, kernel_size=7)
 
     def hybrid_forward(self, F, x):
         f3 = self.f3(x)
@@ -187,16 +191,15 @@ class UpSamplingBlock(gl.HybridBlock):
 
 class CascadePoseNet(gl.HybridBlock):
 
-    def __init__(self, num_kps, num_limb, num_channel):
+    def __init__(self, num_kps, num_limb, num_channel, scale=0):
         super(CascadePoseNet, self).__init__(prefix='cpn')
-        self.scale = 3
+        self.scale = scale
         with self.name_scope():
             self.backbone = None
             self.f4 = ConvBnReLU(256)
             self.f8 = ConvBnReLU(256)
             self.f16 = ConvBnReLU(256)
             self.upx2 = UpSamplingBlock(256, 2)
-            self.htupx2 = UpSamplingBlock(num_kps, 2)
             self.context16 = nn.HybridSequential()
             self.context16.add(ContextBlock(128), ContextBlock(128))
             self.context16tofeat = ConvBnReLU(256)
@@ -217,37 +220,111 @@ class CascadePoseNet(gl.HybridBlock):
         # 16
         f16 = self.f16(f16)
         g_ht16, g_paf16 = self.p16_1(f16)
-        g_mask16 = F.exp(self.scale * F.max(g_ht16, axis=1, keepdims=True))
-        g_mask16 = F.stop_gradient(g_mask16)
-        f16 = F.broadcast_mul(f16, g_mask16)
         f16 = self.context16(f16)
         r_ht16, r_paf16 = self.p16_2(f16)
         f16 = self.context16tofeat(f16)
+        if self.scale > 0:
+            mask16 = F.exp(self.scale * F.max(r_ht16, axis=1, keepdims=True))
+            mask16 = F.stop_gradient(mask16)
+            f16 = F.broadcast_mul(f16, mask16)
         # 8
         f8 = self.f8(f8) + F.Crop(self.upx2(f16), f8)
-        ht8 = F.Crop(self.htupx2(r_ht16), f8)
-        mask8 = F.exp(self.scale * F.max(ht8, axis=1, keepdims=True))
-        mask8 = F.stop_gradient(mask8)
-        f8 = F.broadcast_mul(f8, mask8)
         g_ht8, g_paf8 = self.p8_1(f8)
-        g_mask8 = F.exp(self.scale * F.max(g_ht8, axis=1, keepdims=True))
-        g_mask8 = F.stop_gradient(g_mask8)
-        f8 = F.broadcast_mul(f8, g_mask8)
         f8 = self.context8(f8)
         r_ht8, r_paf8 = self.p8_2(f8)
         f8 = self.context8tofeat(f8)
+        if self.scale > 0:
+            mask8 = F.exp(self.scale * F.max(r_ht8, axis=1, keepdims=True))
+            mask8 = F.stop_gradient(mask8)
+            f8 = F.broadcast_mul(f8, mask8)
         # 4
         f4 = self.f4(f4) + F.Crop(self.upx2(f8), f4)
-        ht4 = F.Crop(self.htupx2(r_ht8), f4)
-        mask4 = F.exp(self.scale * F.max(ht4, axis=1, keepdims=True))
-        mask4 = F.stop_gradient(mask4)
-        f4 = F.broadcast_mul(f4, mask4)
         g_ht4, g_paf4 = self.p4_1(f4)
-        g_mask4 = F.exp(self.scale * F.max(g_ht4, axis=1, keepdims=True))
-        g_mask4 = F.stop_gradient(g_mask4)
-        f4 = F.broadcast_mul(f4, g_mask4)
         f4 = self.context4(f4)
         r_ht4, r_paf4 = self.p4_2(f4)
+        return g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16
+
+    def init_backbone(self, creator, featnames, fixed, pretrained=True):
+        assert len(featnames) == 3
+        install_backbone(self, creator, featnames, fixed, pretrained)
+
+    def predict(self, img, ctx, flip=True):
+        data = process_cv_img(img)
+        if flip:
+            data_flip = data[:, :, ::-1]
+            data = np.concatenate([data[np.newaxis], data_flip[np.newaxis]])
+        else:
+            data = data[np.newaxis]
+        batch = mx.nd.array(data, ctx=ctx)
+        g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16 = self(batch)
+        heatmap = g_ht4[0].asnumpy().astype('float64')
+        paf = g_paf4[0].asnumpy().astype('float64')
+        if flip:
+            heatmap_flip = g_ht4[1].asnumpy().astype('float64')
+            paf_flip = g_paf4[1].asnumpy().astype('float64')
+            heatmap, paf = flip_prediction(heatmap, heatmap_flip, paf, paf_flip)
+        return heatmap, paf
+
+
+class CascadeCPMNet(gl.HybridBlock):
+
+    def __init__(self, num_kps, num_limb, num_channel, scale=0):
+        super(CascadeCPMNet, self).__init__(prefix='cascadecpm')
+        self.scale = scale
+        with self.name_scope():
+            self.backbone = None
+            self.f4 = ConvBnReLU(256)
+            self.f8 = ConvBnReLU(256)
+            self.f16 = ConvBnReLU(256)
+            self.upx2 = UpSamplingBlock(256, 2)
+            self.c16_1 = nn.HybridSequential()
+            self.c16_1.add(ContextBlock(128))
+            self.c16_2 = nn.HybridSequential()
+            self.c16_2.add(ContextBlock(128))
+            self.ft16 = ConvBnReLU(256)
+            self.p16_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p16_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.c8_1 = nn.HybridSequential()
+            self.c8_1.add(ContextBlock(128))
+            self.c8_2 = nn.HybridSequential()
+            self.c8_2.add(ContextBlock(128))
+            self.ft8 = ConvBnReLU(256)
+            self.p8_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p8_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.c4_1 = nn.HybridSequential()
+            self.c4_1.add(ContextBlock(64))
+            self.c4_2 = nn.HybridSequential()
+            self.c4_2.add(ContextBlock(64))
+            self.p4_1 = KpsPafBlock(num_kps, num_limb, num_channel)
+            self.p4_2 = KpsPafBlock(num_kps, num_limb, num_channel)
+
+    def hybrid_forward(self, F, x):
+        f4, f8, f16 = self.backbone(x)  # pylint: disable=not-callable
+        # 16
+        f16_1 = self.c16_1(self.f16(f16))
+        g_ht16, g_paf16 = self.p16_1(f16_1)
+        f16_2 = self.c16_2(f16_1)
+        r_ht16, r_paf16 = self.p16_2(f16_2)
+        f16_2 = self.ft16(f16_2)
+        if self.scale > 0:
+            mask16 = F.exp(self.scale * F.max(r_ht16, axis=1, keepdims=True))
+            mask16 = F.stop_gradient(mask16)
+            f16_2 = F.broadcast_mul(f16_2, mask16)
+        # 8
+        f8_1 = self.c8_1(self.f8(f8) + F.Crop(self.upx2(f16_2), f8))
+        g_ht8, g_paf8 = self.p8_1(f8_1)
+        f8_2 = self.c8_2(f8_1)
+        r_ht8, r_paf8 = self.p8_2(f8_2)
+        f8_2 = self.ft8(f8_2)
+        if self.scale > 0:
+            mask8 = F.exp(self.scale * F.max(r_ht8, axis=1, keepdims=True))
+            mask8 = F.stop_gradient(mask8)
+            f8_2 = F.broadcast_mul(f8_2, mask8)
+        # 4
+        f4_1 = self.c4_1(self.f4(f4) + F.Crop(self.upx2(f8_2), f4))
+        g_ht4, g_paf4 = self.p4_1(f4_1)
+        f4_2 = self.c4_2(f4_1)
+        r_ht4, r_paf4 = self.p4_2(f4_2)
         return g_ht4, g_paf4, r_ht4, r_paf4, g_ht8, g_paf8, r_ht8, r_paf8, g_ht16, g_paf16, r_ht16, r_paf16
 
     def init_backbone(self, creator, featnames, fixed, pretrained=True):
@@ -421,7 +498,7 @@ def parse_from_name_v3(name):
     return prefix, backbone, channels, batch_size, optim, epoch
 
 
-def load_model(model, version=2):
+def load_model(model, version=2, scale=0):
     num_kps = cfg.NUM_LANDMARK
     num_limb = len(cfg.PAF_LANDMARK_PAIR)
     if version == 2:
@@ -430,7 +507,11 @@ def load_model(model, version=2):
         creator, featnames, fixed = cfg.BACKBONE_v2[backbone]
     elif version == 3:
         prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
-        net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
+        net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel, scale=scale)
+        creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
+    elif version == 4:
+        prefix, backbone, num_channel, batch_size, optim, epoch = parse_from_name_v3(model)
+        net = CascadeCPMNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel, scale=scale)
         creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
     else:
         raise RuntimeError('no such version %d'%version)

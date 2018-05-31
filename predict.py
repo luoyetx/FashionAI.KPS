@@ -25,13 +25,20 @@ def work_func(df, idx, args):
     data_dir = args.data_dir
     model_path = args.model
     version = args.version
+    scale = args.scale
     show = args.show
     multi_scale = args.multi_scale
     logger = get_logger()
     # model
-    net = load_model(model_path, version=version)
+    net = load_model(model_path, version=version, scale=scale)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
+    if args.emodel != '':
+        enet = load_model(args.emodel, version=args.eversion, scale=scale)
+        enet.collect_params().reset_ctx(ctx)
+        enet.hybridize()
+    else:
+        enet = None
     # data
     image_ids = df['image_id'].tolist()
     image_paths = [os.path.join(data_dir, img_id) for img_id in image_ids]
@@ -42,6 +49,10 @@ def work_func(df, idx, args):
         img = cv2.imread(path)
         # predict
         heatmap, paf = multi_scale_predict(net, ctx, img, multi_scale)
+        if enet:
+            eheatmap, epaf = multi_scale_predict(enet, ctx, img, multi_scale)
+            heatmap = (heatmap + eheatmap) / 2
+            paf = (paf + epaf) / 2
         kps_pred = detect_kps(img, heatmap, paf, category)
         result.append(kps_pred)
         # show
@@ -77,7 +88,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default='0')
     parser.add_argument('--model', type=str, required=True)
-    parser.add_argument('--version', type=int, default=2)
+    parser.add_argument('--version', type=int, default=3)
+    parser.add_argument('--scale', type=int, default=0)
+    parser.add_argument('--emodel', type=str, default='')
+    parser.add_argument('--eversion', type=int, default=4)
+    parser.add_argument('--escale', type=int, default=0)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--multi-scale', action='store_true')
     parser.add_argument('--num-worker', type=int, default=1)
@@ -90,7 +105,7 @@ def main():
         data_dir = cfg.DATA_DIR
         df = pd.read_csv(os.path.join(data_dir, 'val.csv'))
     else:
-        data_dir = os.path.join(cfg.DATA_DIR, 'r2-test-a')
+        data_dir = os.path.join(cfg.DATA_DIR, 'r2-test-b')
         df = pd.read_csv(os.path.join(data_dir, 'test.csv'))
     args.data_dir = data_dir
     #df = df.sample(frac=1)

@@ -55,6 +55,7 @@ def main():
     parser.add_argument('--th', type=float, default=0.04)
     parser.add_argument('--model', type=str)
     parser.add_argument('--version', type=int, default=2)
+    parser.add_argument('--scale', type=int, default=0)
     args = parser.parse_args()
     print(args)
     img_lst, kps_gt, category = read_csv(args.gt)
@@ -64,7 +65,7 @@ def main():
     # model
     if args.model:
         ctx = mx.gpu(0)
-        net = load_model(args.model, version=args.version)
+        net = load_model(args.model, version=args.version, scale=args.scale)
         net.collect_params().reset_ctx(ctx)
         net.hybridize()
 
@@ -99,10 +100,10 @@ def main():
                 # show
                 landmark_idx = cfg.LANDMARK_IDX[cate]
                 heatmap = heatmap[landmark_idx].max(axis=0)
-                cv2.imshow('heatmap', draw_heatmap(roi, heatmap))
+                cv2.imshow('heatmap', draw_heatmap(img, heatmap))
                 cv2.imshow('kps_pred', draw_kps(img, pred))
                 cv2.imshow('kps_gt', draw_kps(img, gt))
-                cv2.imshow('paf', draw_paf(roi, paf))
+                cv2.imshow('paf', draw_paf(img, paf))
                 key = cv2.waitKey(0)
                 if key == 27:
                     break

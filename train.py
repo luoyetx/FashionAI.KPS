@@ -17,7 +17,7 @@ from tensorboardX import SummaryWriter
 
 from lib.config import cfg
 from lib.dataset import FashionAIKPSDataSet
-from lib.model import PoseNet, CascadePoseNet, load_model
+from lib.model import PoseNet, CascadePoseNet, CascadeCPMNet, load_model
 from lib.utils import get_logger, Recorder
 
 
@@ -142,10 +142,11 @@ def main():
     parser.add_argument('--backbone', type=str, default='resnet50', choices=['resnet50', 'resnet101'])
     parser.add_argument('--model-path', type=str, default='')
     parser.add_argument('--prefix', type=str, default='default', help='model description')
-    parser.add_argument('--version', type=int, default=2, choices=[2, 3], help='model version')
+    parser.add_argument('--version', type=int, default=2, choices=[2, 3, 4], help='model version')
     parser.add_argument('--num-stage', type=int, default=3)
     parser.add_argument('--num-channel', type=int, default=256)
     parser.add_argument('--num-context', type=int, default=2)
+    parser.add_argument('--scale', type=int, default=0)
     parser.add_argument('--ohkm', action='store_true')
     args = parser.parse_args()
     # seed
@@ -153,6 +154,7 @@ def main():
     np.random.seed(args.seed)
     # hyper parameters
     ctx = [mx.gpu(int(x)) for x in args.gpu.split(',')]
+    num_ctx = len(ctx)
     data_dir = cfg.DATA_DIR
     lr = args.lr
     wd = args.wd
@@ -169,11 +171,14 @@ def main():
     num_channel = args.num_channel
     num_context = args.num_context
     ohkm = args.ohkm
+    scale = args.scale
     version = args.version
     if version == 2:
         base_name = 'V2.%s-%s-S%d-C%d-C%d-BS%d-%s' % (prefix, backbone, num_stage, num_channel, num_context, batch_size, optim)
     elif version == 3:
         base_name = 'V3.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
+    elif version == 4:
+        base_name = 'V4.%s-%s-C%d-BS%d-%s' % (prefix, backbone, num_channel, batch_size, optim)
     else:
         raise RuntimeError('no such version %d'%version)
     filename = './tmp/%s.log' % base_name
@@ -184,8 +189,8 @@ def main():
     df_test = pd.read_csv(os.path.join(data_dir, 'val.csv'))
     traindata = FashionAIKPSDataSet(df_train, version=version, is_train=True)
     testdata = FashionAIKPSDataSet(df_test, version=version, is_train=False)
-    trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=4)
-    testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=4)
+    trainloader = gl.data.DataLoader(traindata, batch_size=batch_size, shuffle=True, last_batch='discard', num_workers=num_ctx)
+    testloader = gl.data.DataLoader(testdata, batch_size=batch_size, shuffle=False, last_batch='discard', num_workers=num_ctx)
     epoch_size = len(trainloader)
     # model
     if not model_path:
@@ -195,7 +200,10 @@ def main():
             net = PoseNet(num_kps=num_kps, num_limb=num_limb, num_stage=num_stage, num_channel=num_channel, num_context=num_context)
             creator, featnames, fixed = cfg.BACKBONE_v2[backbone]
         elif version == 3:
-            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel)
+            net = CascadePoseNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel, scale=scale)
+            creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
+        elif version == 4:
+            net = CascadeCPMNet(num_kps=num_kps, num_limb=num_limb, num_channel=num_channel, scale=scale)
             creator, featnames, fixed = cfg.BACKBONE_v3[backbone]
         else:
             raise RuntimeError('no such version %d'%version)
@@ -203,7 +211,7 @@ def main():
         net.init_backbone(creator, featnames, fixed, pretrained=True)
     else:
         logger.info('Load net from %s', model_path)
-        net = load_model(model_path, version=version)
+        net = load_model(model_path, version=version, scale=scale)
     net.collect_params().reset_ctx(ctx)
     net.hybridize()
     criterion = SumL2Loss()
@@ -233,7 +241,7 @@ def main():
             rd2 = Recorder('p-%d' % i, freq)
             rds.append(rd1)
             rds.append(rd2)
-    elif version == 3:
+    elif version == 3 or version == 4:
         rds = [Recorder('G-h-04', freq), Recorder('R-h-04', freq), \
                Recorder('G-h-08', freq), Recorder('R-h-08', freq), \
                Recorder('G-h-16', freq), Recorder('R-h-16', freq), \
@@ -247,7 +255,7 @@ def main():
     # forward and backward
     if version == 2:
         forward_backward = forward_backward_v2
-    elif version == 3:
+    elif version == 3 or version == 4:
         forward_backward = forward_backward_v3
     else:
         raise RuntimeError('no such version %d'%version)

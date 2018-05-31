@@ -106,7 +106,7 @@ def get_border(shape, kps, expand=0):
     return (xmin, ymin, xmax, ymax)
 
 
-def get_label(height, width, category, kps, stride, sigma=7, th=1):
+def get_label(height, width, category, kps, stride, sigma=7, gk=7, th=1):
     grid_x = width // stride
     grid_y = height // stride
     # heatmap and mask
@@ -150,9 +150,10 @@ def get_label_v3(height, width, category, kps):
     strides = [16, 8, 4]
     sigmas = [7, 7, 7]
     ths = [1, 1, 1]
+    gks = [7, 7, 7]
     rs = []
-    for stride, sigma, th in zip(strides, sigmas, ths):
-        r = get_label(height, width, category, kps, stride, sigma, th)
+    for stride, sigma, gk, th in zip(strides, sigmas, gks, ths):
+        r = get_label(height, width, category, kps, stride, sigma, gk, th)
         rs.append(r)
     return rs
 
